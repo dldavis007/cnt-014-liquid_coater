@@ -68,9 +68,10 @@ INCS := -I. -I$(SRC)
 # globals by pointer arithmetic off the end of an array (the same stroke-table
 # trick Rev4.34 documents), which only holds while GCC lays the arrays out
 # contiguously in declaration order, the way ICC12 does.
-PROD_CFLAGS := -w -g -std=c11 -m32 -funsigned-char -malign-data=abi -ffunction-sections \
+# -fpermissive allows legacy C89/C90 constructs (e.g., tempstr[0]=NULL) on GCC 14+.
+PROD_CFLAGS := -w -g -std=c11 -m32 -fpermissive -funsigned-char -malign-data=abi -ffunction-sections \
                -MMD -MP -Wno-unknown-pragmas -Wno-builtin-declaration-mismatch $(PC_DEF)
-
+			   
 # Our host TUs: keep real warnings on.
 HOST_CFLAGS := -g -std=c11 -m32 -funsigned-char -malign-data=abi -ffunction-sections \
                -MMD -MP -Wall -Wno-unknown-pragmas $(PC_DEF)
