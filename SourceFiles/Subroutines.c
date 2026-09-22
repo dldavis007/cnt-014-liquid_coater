@@ -93,9 +93,9 @@ unsigned cam_add2;
 unsigned ran_num;  //used to create unique camera address  
 
 // signed: these are tri-state (0/1/-1) and the -1 compare must hold on both compilers
-char CursorDownFlag;
-char CursorUpFlag;
-char SelectFlag;
+signed char CursorDownFlag;
+signed char CursorUpFlag;
+signed char SelectFlag;
 char CamAddressXmitd;
 
 float RDR_Ratio;
