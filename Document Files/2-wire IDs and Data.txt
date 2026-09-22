@@ -1,0 +1,57 @@
+2-Wire Controller	0x001
+
+
+Horita Unit-ID		0x010 		
+
+	Data sent to the Horita will be transmitted through the serial port to the Horita.  Up to 8 characters may be sent at one time.  If sending less than 8 characters, imbed a null character at the end.  Refer to the Horita user manual for specific codes.  
+
+
+2x1 Video Switch 	0x020
+
+	Send 1 byte, Bit 0 = NO1 connected to COM, Bit 1 = NO1 connected to COM.
+
+
+4x1 Video Switch	0x030
+
+	Send 1 byte  xx,xx,d3,d2,d1,d0,a1,a0,   d2 & d3 are used for control codes, d1  & d0 select the input.  a1 & a0 select the output
+
+
+Cleaner	   		 	0x038
+
+
+Vacuum				0x03c
+
+
+Coater 2-Wire Cntr	0x040
+
+	Send 8 bytes    Lights1,lights2,Heater1,Heater2,Pump,Head,CamIndex,RotoCam
+
+	Lights1  0 - 100 PWM
+	Lights2  Not used
+	Heater1  0 - 100 PWM
+	Heater2  0 - 100 PWM
+	Pump	 0 - 100 PWM
+	Head	 0 or 1  Off/On
+	CamIndex 0 or 1  Off/On
+	RotoCam  0 - 100 PWM = CW,  128 - 228 = CCW,  (0x00 - 0x64  or 0x80 - 0xe4)
+
+
+Custom Coating Monitor	 0x50
+
+	RPDO1 3 bytes    	 Holiday, Pump, Tone
+	
+	Holiday    0x01 = On 		  0x00 = Off
+	Pump	   0x01 = On		  0x00 = Off
+	Tone	   0x01 = On		  0x00 = Off
+	
+	
+	TPDO1	   2 bytes		 Battery voltage level
+	
+	
+	TPD02 	   3 bytes	  	 Button Box LSB, Button Box MSB, Holiday Detected
+	
+	Button Box Data     0x00 0x00     Bit stuffed Button box data
+	Holiday Detected    0x00 = Detected	   0x01 = No Detection
+	  
+	  
+FBE Coater				0x70

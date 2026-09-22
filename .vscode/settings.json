@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "controller.h": "c",
+        "packets.h": "c",
+        "menuserialize.h": "c"
+    }
+}

@@ -1,0 +1,116 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Project",
+            "type": "shell",
+            "command": "${workspaceFolder}/.vscode/build.bat",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "detail": "Runs the project build process by deleting .o files and compiling the project.",
+            "options": {
+                "cwd": "${workspaceFolder}/.vscode"
+            }
+        },
+        {
+            "label": "Build and Deploy NOICE Project",
+            "type": "shell",
+            "command": "${workspaceFolder}/.vscode/build_deploy_noice.bat",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "detail": "Runs the project build process by deleting .o files and compiling the project.",
+            "options": {
+                "cwd": "${workspaceFolder}/.vscode"
+            }
+        },
+        {
+            "label": "VSConvert Task",
+            "type": "shell",
+            "command": "${workspaceFolder}/.vscode/vsconvert.bat",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "detail": "Organizes project files and modifies .src file.",
+            "options": {
+                "cwd": "${workspaceFolder}/.vscode"
+            }
+        },
+        {
+            "label": "Test: All Tests",
+            "type": "shell",
+            "command": "mingw32-make summary",
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared"
+            },
+            "detail": "Builds and runs all Unity suites, then prints an aggregate summary (total passed/failed + a list of failures). Exits non-zero if anything failed.",
+            "options": {
+                "cwd": "${workspaceFolder}/tests"
+            }
+        },
+        {
+            "label": "PC-Side: Build & Run",
+            "type": "shell",
+            "command": "mingw32-make run",
+            "options": {
+                "cwd": "${workspaceFolder}/pc_side"
+            },
+            "group": "test",
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "detail": "Builds and runs the PC-side host: real doevents() loop on the PC with live logging and a UDP CAN bus (Ctrl+C to quit)."
+        },
+        {
+            "label": "PC-SIDE: Tests, Build & Run",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Test: All Tests",
+                "PC-Side: Build & Run"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": [],
+            "detail": "Runs all Unity suites (with an aggregate pass/fail summary) first; only if they ALL pass does it compile the SourceFiles PC SIDE via 'PC-Side: Build & Run'. A failing test aborts the sequence before the firmware build."
+        }
+    ]
+}

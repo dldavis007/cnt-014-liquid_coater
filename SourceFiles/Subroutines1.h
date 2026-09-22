@@ -1,0 +1,61 @@
+#ifndef Subroutines1_H
+#define Subroutines1_H
+
+ 
+
+#define RDR12EncoderRes 512.0 //256*2
+#define RDR12SprocketGear 16.0 // Amount of teeth on sprocket attached to encoder
+#define RDR12MainGear 74.0 // Amount of teeth on main gear attached to sprocket
+
+#define RDR24EncoderRes 512.0
+#define RDR24SprocketGear 24.0
+#define RDR24MainGear   120.0
+
+
+#define RDR24 ((RDR24MainGear/RDR24SprocketGear)*RDR24EncoderRes)/360.0
+#define RDR12 ((RDR12MainGear/RDR12SprocketGear)*RDR12EncoderRes)/360.0
+
+#define STOPMARGIN 6 //Degrees that RDR stops preemptively before hitting barstop.
+#define STOPWIDTH 8 //Degrees from 180 that home position is initialized at.
+
+//Old RDR values
+//#define RDR24 7.111
+//#define RDR12 6.578
+
+struct PID{
+float Kp;       //Kp     
+float Ki;       //Ki
+float Kd;       //Kd
+float desired_value;    //Desired value the PID should reach
+float previous_error;   //Previous error of PID in last loop
+float Integral;         //Integral accumulated
+float dT;               //Difference in time
+};
+
+//#pragma paged_function Save_Camera_Add1 Save_Camera_Add2 Load_Serial_Num Save_Serial_Num
+#pragma nonpaged_function MoveLA Save_Serial_Num Save_Camera_Add1 Save_Camera_Add2
+#pragma nonpaged_function ATDGetLevel SecondCoatSeq FirstCoatSeq throwGhost
+//#pragma nonpaged_function CameraMain1 CameraMain2
+//#pragma paged_function CameraMain2 throwGhost CleanCoatSeq
+
+
+void Save_Camera_Add1 ( void );
+void Save_Camera_Add2 ( void );
+void Load_Serial_Num ( void );
+void Save_Serial_Num ( void );
+void MoveLA (float Pos, int Spd, int Current );
+int ATDGetLevel ( char ATD_Num );
+int SecondCoatSeq ( int Start );
+int FirstCoatSeq ( int Start );
+void doevents ( void );
+void CameraMain1 ( void );
+void CameraMain2 ( void );
+void throwGhost(void);
+int CleanCoatSeq ( int Start );
+//MUST UPDATE PREV ANGLE RIGHT AFTER
+float GetRotationalSpeed(int current_angle, int previous_angle, float dt);
+float PID_Loop(struct PID* pid, float actual_value);
+
+
+
+#endif

@@ -1,0 +1,416 @@
+Revision 1.00  12-15-10
+
+    Initial release, made from Liquid Coater, ID Machine Rev 2.23.
+	
+Revision 1.01  03-24-11
+
+    Changed pump speed from whole numbers 0-100% to fractions 0.0-99.9% (100%)
+	Added Retract All, Extend All, changed retract after coating from 1 sec to 7 sec.
+	Limited heater updates to 5 seconds, fix a problem with Hose heater causing too
+	many updates.
+	
+Revision 1.02  03-31-11
+
+    Added variable time for retract after coating.  Made cleanout continue moving
+	the head. Switch position of Base and ISO entries in menu, made Heater 1 Base
+	and Heater 2 ISO.
+	
+Revision 1.03  05-10-11
+
+    Once the pumps are turned on, the speed can not be changed unless they are turned off
+	then back on.  Changed this so the speeds could be changed without turning them off.	
+
+Revision 2.00   6-24-11
+
+	Updated for new board revision R2.
+	Head motor is driven with on board FETs, removed TPDO and added PWMDTY3 to drive head
+	
+Revision 2.01   8-18-11
+
+	Changed MenuTime from 1/3 second to 1/5 second. 
+	Added Blower function to menu.
+	Removed second update menu area in doevents.
+	Changed delay .02s in DisplayTitler function to .004s. 
+	Added code to make sure up/down/select were initial cleared when the menu is first
+	brought up.  The 2-wire controller outputs these initially, until its menu is brought
+	up.  It then stops sending them. This causes both up and down to be selected when the
+	coater menu is brought up.
+	Moved call to UpdateHtrs into MenuTimer group.  Initialized MenuTimer to 2 seconds.
+	Moved variables 1 position to the right in the Setup Menu.
+	Changed default L.A. speeds to 100%.
+		
+Revision 1.00   1-15-12
+
+	Modified 8-10 to 24-48" Liquid Coater
+	
+Revision 1.01	2-10-12
+
+	Added code to DeSelect() to output menu inactive on 2-wire before saving variables to speed up menus.
+	Added code to make the menu behave better.
+	Re-Enabled COP	
+	
+Revision 2.00	2-18-12
+
+	Modified for Rev D
+	
+Revision 2.01	3-20-12
+
+    Reversed counting direction of encoder, fixed home sensor always active problem.
+	Corrected hangup problem with 0 full-strokes.
+	Changed LAPos to a (float) this was causing the length of the strokes to be wrong.
+	Added a Home L.A. function at the end of the coating routine.
+	Added turbo to the rotating camera.
+	
+Revision 2.02   5-2-12
+
+    Camera 2 Focus Far and Near were reversed. Corrected this problem.
+
+Revision 2.03   5-3-12
+
+	Found that Zoom Speed for Camera 2 was using Camera 1 settings. Corrected this problem
+	
+
+Revision 3.00   7-24-2012
+
+    Modified TPDOs for the Pump, Heater and Actuator Controller.  RPDO 1 in these units are
+	now used for the menu.  
+    
+	Rev 2.04 must be used with: 
+	Pump Rev 1.01 
+	Heater Rev 1.01 
+	Actuator Rev 1.03?
+
+    from Rev 2.04 24-48 Coater Rev D board
+    change void PositionDisplay ( void ) so command is <STX>0028\r
+    change void ClearTitler ( void ) so command is <STX>0025\r
+    Change titler PDO from 0x210 to 0x310		
+	Changed Button Box RPDO to 3 bytes
+
+Revision 3.00	10-12-2012
+
+    Modified Display() function calls in subroutines by prepending message type identifiers at the front of the message strings
+	Proc: for process start or completion
+	Warn: for warning message(s)
+	
+Revision 3.01	11-26-2012
+
+	Incorporated Rev 2.04 changes as follows:
+	Added menu entry to select machine size. The RDR resolution is different between 
+	the two machines.
+	Found that the PWM (actually TC0) for the lights was causing a flicker in video.
+	Setting the lights to max value or off should eliminate the flicker. Changed the lower 
+	limit in TC0 from 10% to 9%, this allows light setting 3 to come on (1 and 2 are off).
+	The flickering seems to be a beat frequency issue, needs further investigation.  
+    changed prefix for inspection camera position from Proc to Icam
+
+Revision 3.02	11-28-12
+
+	Changed TPDO 3 from 3 bytes to 2 bytes.  The third byte (current) is not used
+	Changed RPDO 6 from 6 bytes to 5 bytes, 6th byte was needed for store serial number command (no longer used)
+	Reworked MoveLA function and coating sequences,  MoveLA returns a 1 if it can move else it returns 0
+	Added Serial Number function
+	Added function to advance the film (Button box PLC_Trigger and Camera Toggle 2)
+	Added function to turn on the blower (Button box PLC_Trigger and Camera Toggle 1)
+    Added Camera Tag(s)
+	Remarked ClearTitler in DeSelect function.
+	Added command to turn off other cameras (1 & 2) when camera menu is activated
+	Cleared up/down/select in camera(s) menu activation
+	Changed Camera 1 & 2 to just Camera in all but Camera selection menu
+	Changed default light levels from 7 to 10, Changed Var0to10Funct to NullFunction to prevent changes 	
+    In DeSelect() - gProcImg[IN_digi_0] &= ~0x01; needs to be after Save_Variables();
+        because SaveVariables() is a slow process
+    In DeSelect() - include ClearTitler ();
+    
+Revision 3.03   1-2-13
+    move gProcImg[IN_digi_0] &= ~0x01; and ClearTitler (); to before SaveVariables() to speed up return from menu
+    
+Revision 3.04   1-11-13
+    removed: gProcImg[IN_digi_0] &= ~0x01; from menu section, it's only in DeSelect()
+        this should not matter much
+    removed ramp up and ramp down of head motor, now PWMDTY1 is 100 or 0    
+	
+Revision 3.05   1-17-13
+    Changed the heater operation.   
+	Was 2 base heaters on heater 1, 1 ISO heater on heater 2 and a hose heater on heater 3.
+	Now 1 base heater on heater 1, 1 base heater on heater 2, 1 ISO heater on heater 3 and no hose heater.  
+	The Heater controller also was changed to allow the RTD for heater 1 to control both heater 1 and 2.
+	Use heater controller 2.02 and above.
+	Added Advance Film to Main Menu
+
+Revision 3.06   1/31/2013
+    Added startGhost() and throwGhost() routines and Ghost Band to menu to execute a ghost band sequence
+    
+Revision 3.07	4-20-13
+	Added code to stop RDR motor when high current detected from Sense output (PT3 active low and PAD6 = 2V).   
+	Changed TC3_Int_Handler from 1ms timer for CAN to TC5_Int_Handler. TC3_Int_Handler now detects
+	a low going pulse from the Sense output.  
+	Removed Init_SCI and Init_SPI. 
+	Moved "Coating Complete" message to a new state 1 second after moving LA
+	Removed code in TC0_Int_Handler that was not being used
+	Re-wrote code for RDR.  
+	
+	Board needs modification to provide 5V reference to the A/D	
+	
+Revision 3.08   5-02-13
+
+    Found that code that rotates the camera was not shutting off properly.
+	
+Revision 4.00   5-06-13
+
+    Changed from non-paged to paged flash.
+	
+	noice change "Use paged memory (PPage at 0030)".
+	A new setting has been added to the menu: "Camera Trip Pt".  
+	Defaults need to be restored after programming.
+	Camera Trip Point range is from 0-100%.
+	100% is about 1 amp.
+	home will be close to 180 +/- 2 depending on machine size.
+	Stops when home is detected.
+	rotates about 354 degress from home and stops.
+	When rotating away from home after reset/power-on, travel will be limited to 
+	  the position where the camera was located when the reset/power-up cycle occured.
+	repeatedly rotating cw and ccw near this stop point may cause rotation to 
+	  continue away from home until the stop is hit.
+	  
+Revision 4.01  5-22-13
+
+	Found that the home sensor for the rotating camera was on the same side of the stop as the smaller machine.
+	Changed the program to fix this.
+	Added "Stop_Detected" variable for readablity.
+	Home and stop postions for 24" machine; 180 - 170 degrees (180-270-0-90-170).
+	Other machine size (12") is 180 - 170 degrees (180-270-0-90-170).
+	
+	Disabled encoder unless the button is being pushed.  This will elminate the large
+	changes in value created by vibration, but will cause the reading to be wrong if
+	the camera actually moves while the buttons are not pressed.
+
+Revision 4.02  6-3-13
+
+	Changed the range of the rotating camera to (182-270-0-90-167).  The camera was hitting
+	the stop when rotated away from the home sensor.
+
+Revision 4.03  9-17-13
+
+	Changed the code so that the Coater will only trigger when one of the Coater cameras is selected.
+	
+	Moved StartGhost function out of extended memory and changed some timing in the ghost sequence.
+	
+	Changed the position and name of "Ghost Band" Material menu entry now "Purge Material".
+	
+Revision 4.04  9-29-13
+
+	Added code to recv "moving" RPDO from purge unit so the Head could make sure the actuator 
+	was working.  Also added progress messages to Purge sequence.  
+	Added code to prevent coater from triggering if there was an error during the purge 
+	sequence, of if the purge sequence was not completed.
+	Changed COPCTL to allow debug.
+	Changed the Purge Unit retract command from 0 to 2.  A zero is what the procImg is after
+	reset, so trying to send a zero does nothing after reset.
+	Added code to retract the purge unit before coating.
+	Added code to not trigger purge if coating
+
+
+Rev 4.05    10-2-2013
+    Corrected a problem where the Coater would go ahead and trigger if it had been triggered while its camera was not selected.  
+	The next time the Coater camera got selected it would trigger.
+	
+
+Rev 4.06	 01-06-14
+	Re-assigned Home Sensor to detect Head shaft rotation.  Changed rotating camera home function to assume home when 
+	current limit is reached.
+	
+	Re-worked coating sequence to make the linear actuator movements were more consistent.  Added function to stop coating
+	if the Head rotation is not detected.
+	
+	Enabled SDO write to Index 2100,  byte 1 & 2 are the address, byte 3 is the data, byte 4 is a checksum
+	
+	Loc 0x8001 = 0x24   0x5A checksum 	   	 230021015A240180
+	
+    Send these to Entry Index 0x2100, Entry SubIndex 0x00, to upload the program
+    
+    DD18000B		movb #0x55,0x3f
+    E90B010B
+    9E55020B
+    F200030B
+    B23F040B
+    D818050B		movb #0xAA,0x3f
+    E40B060B
+    44AA070B
+    ED00080B
+    AD3F090B
+    E5060A0B		Jmp 0B00
+    DF0B0B0B
+    E9000C0B
+    
+    Send this to Entry Index 0x2100, Entry SubIndex 0x01, to run the program
+    
+    F500000B
+	
+Rev 4.07	02-17-14
+	Re-enabled the Head Ramp.  Changed the all of the PWM clocks to 156Hz(was 625Hz)
+	Fix problem where OldPumpSpeed had been remarked out
+	
+Rev 4.08	02-22-14
+	Found that the Head ramping up was causing the coater menu to disappear (scrambling the menu)
+	Made the head ramp up faster to prevent this problem
+	**Removed Head Ramp***
+	
+Rev 4.09	03-03-14
+	Added timeout check for Linear Actuator.  LAMoveTimer checks to make sure LA begins moving within .5 sec
+	LAMovingTimer checks to make sure LA has completed its move within 1.25 * ( .79sec per in * distance * Spd/100)
+
+Rev 4.10	05-10-14
+    Fixed Timeout problem.  Found that states would step to the next step before LA was moving at the end of First, 
+    Second and Cleanout cycles, removed the final movement from these functions
+    Changed 'Center' and 'Full' strokes to 'First' and 'Second' strokes
+    Added Speed up Increment/Decrement of the menu variables
+    Change the Center and Full Setup so that changing the first line changes all the lines
+    Added more Feedback (stroke numbers, etc.)
+    Reworked the coating cycles, removed the movements to the center, coating starts at extended end of stroke
+
+    
+Rev 4.11	 07-16-14
+	Worked on Purge Sequence to make it work more reliable.  
+
+Rev 4.12	 07-28-14
+	Added a minimum of 2 seconds to the LAMovingTimer calculation in moveLA function to prevent timeouts when the coating
+	stroke is set to short distances.
+
+Rev 4.13     08-03-15
+    Worked on bootloader. Fixed if statement in 'MCO_Handle_SDO_Request' ('if ( index = 2100 && ...' instead of 
+	'if ( index == 0x2100 && ...'.
+	 
+Rev 4.14     12-17-15
+    Fixed external camera menu problem. Camera 2 menu was being brought up for Camera 1 and vise-versa.
+	 
+Rev 4.15     04-25-16
+    Fixed a problem with the heaters on the 12" machine (not turning on proper heaters).
+	 
+Rev 4.16  	 10-18-18
+	Changed frequency of PWM to Inspection camera motor to minimize interference in the video.
+	
+Rev 4.17	 03-21-19
+	Fixed problem where Inspection Camera stops at 0 degrees. Re-wrote and simplified section that checks for 
+	end of travel (previously attempted to skip over 360/0 position). 
+	Also removed requirement for rotate buttons to be pushed before updating position 
+	  
+Rev 4.18 	 06-14-19
+    Changed code to add Heater 3 to drive second base heater
+	RTD-1 controls Heater 1 & 3
+	RTD-2 controls Heater 2
+	RTD-3 not used
+
+Rev 4.19 	 07/26/19  	  
+	Trying to make the CNT-024 work. 
+	Fixed Problem with Second Strokes not starting til half way through 1st stroke. 
+
+Rev 4.20 12/12/19
+	Added new Menu.
+	Fixed Save_Variables function with new menu structure.
+	Changed the way states behave with the actuator to handle the PID loop in the actuator. 
+	Cleaned up a lot of unneeded variables and memory space. 
+	
+Rev 4.21 12/16/19
+	Added motor polarity.  //neg for new motor MPP. pos for old motor MPP.	
+	Fixed Save Serial Num. 
+	Changed Menu. Added Inspection Cam Menu with motor pol to reverse direction of RDR camera.
+
+Rev 4.22 1/27/20
+	Added LAType variable in menu.
+	changed tpdo's to use either cleaner actuator or actuator cart.
+
+Rev 4.23 4/1/20
+	Light levels got changed in Rev 4.20 from non-adjustable level of 10 to adjustable 0-100. 
+	The adjustable lights cause a strobe effect with the cameras, so they are fixed at "10" (100%).
+
+Rev 4.24 7/15/20
+	Fixed menu index in Heater to display Current Temperature under Heater Sub-menu
+	Fixed the MachineSize variable to save the set values in the settings
+	Modified Load_Variables to save till SecondStrokeCtr[9] 
+	Removed #define diag to detect head rotation errors
+	
+Rev 4.25 3/25/21 dld
+    Fixed a timeout problem where actuator didn't extend when FirstStrokes set to zero.
+	Changed code in coating sequence to also look for SecondStrokes and CleanOut Strokes set to zero
+	Removed LAMaxPos and replace all occurances with MaxLADist.value
+	Changed Coating Sequence to require that the Actuator be extended before coating. If not extended,
+	it will extend and then it can be triggered again.
+	
+Rev 4.26 7-19-22	  dld
+
+	Enabled COP (it was remarked out)
+	Enabled CAN filters (including NMT messages)
+	Updated "MCOHW_SetCANFilter" to newer function that consolidates default RPDOs
+	Updated function calls to "MCOHW_SetCANFilter"
+	Set number of RPDOS and TPDOS to 8
+	
+Rev 4.27 9-7-22       dld
+
+	Reconfigured Options so the program could be used on either processor; 9S12Dx128 or 9S12Dx256
+	
+Rev 4.28 1-12-2023 	dld
+	
+	Changed way LAPos variable was set and removed it in all locations except for the Initial trigger check.  If the actuator is not 
+	in the fully extended position when trigger, the trigger sequence should not occur (a message will be displayed). 
+	The initial trigger will extend the actuator. The line-up should be done again with the head in the extended position.
+			
+	"Load_Variables" function was not converting the string to value on the last 2 lines of the 2nd Stroke Center setting "SecondStrokeCtr".  The
+	program stores and retreives these settings as a string, but they need to be converted to a float when being used in various other places. The
+	"Load_Variables" function loaded the strings but failed to update the values.
+
+Rev 4.29 8/27/2024 dwm
+
+	Following dld's modifications with following notes
+	MAX33011 Fault changes  
+	- Changes to Controller.c file to accommodate changes to the mco stack
+		- (Controller.c) moved InitCANopen() function from before INTR_ON() to after INTR_ON(); 
+		- (Controller.c) changed InitCANopen() function to call Reset_Max33011() before calling MCOUSER_ResetCommunication(), deleted while
+
+	- Changes to MCO Stack to increase robustness and clear faults in the MAX330112
+		- (mco.c) added #include "mc9s12a128.h", int No2WireCnt = 0; and extern char Gen_Flags;
+		- (mco.c) added code to check for Gen_Flags_No2Wire flag in MCO_ProcessStack() to reinitialize the mco stack
+		- (mco.c) added interrupts.h to mco.c for Gen_Flags_No2Wire variable
+		- (mco.c) added reference to mco.h in subroutines.h
+		- (mco.c) added subroutines.h to mco.c for InitCANopen() 	
+		- (mco.c) added Reset_Max33011() function, this redirects the CAN, then reads and clears the fault from the MAX33011 (done)
+		- (mco.h) added Reset_Max33011() protype (done)
+		- (mcohw.c) added Timer1 to while loops when waiting for CAN status with calls to COP (4 places) 
+		- (user.c) added INTR_ON() to MCOUSER_ResetCommunication() function
+		- (user.c) changed MCOUSER_FatalError() function to call InitCANopen() instead of error_state() (got rid of 2Wio.c)
+		- removed 2Wio.c and 2Wio.h and all references to include the header file
+		- (mco.c) dded extern unsigned int Timer1 to mco.c
+		- changed spelling of InitCANopen to InitCANOpen 
+
+Rev 4.30	11-19-24	EBB
+
+	Changes to update for MAX33011 and new CAN filtering.
+	- (mcohw.c) Changed MCOHW_SetCANFilter() to new version. Also added setFilters[] to keep track of each filter.
+	- (user.c) Changed clearing gProcImg[] in MCOUSER_ResetCommunication() so that it only clears on startup using clearProc.
+	- (user.c) Added clearing setFilters[] in MCOUSER_ResetCommunication() so that when MAX33011 resets it reinitializes RPDO/TPDOs properly. 
+	- (mcohw.h)  Changed MCOHW_SetCANFilter() define so it only takes one argument.
+	- (mco.c)	Removed second argument from all instances of MCOHW_SetCANFilter().
+	
+	- Changed length of gProcImg[] array from 53 to 55. Was causing variables to be incorrectly set.
+
+Rev 4.31	12-05-24	EBB
+
+	- Created new option in "INSP CAM SETTINGS" that controls how often the inspection camera stops while rotating.
+	- The stopping during rotation should allow user to hold CW or CCW and auto stop to alleviate motion blur problems.
+	- Holding both CW and CCW at the same time to go faster prevents stopping.
+
+Rev 4.32	12-17-24	EBB
+
+	- Changed encoder value calculation for TC7. Now based on encoder direction and not button box data.
+	- Changed timing of PWMDTY0 and PWMDTY2 for inspection cam. Turns off via interrupts as well as subroutines so encoder actuation is more consistent.
+	- This fixed a problem during inspection cam rotation where every 6th stop was slightly longer. 
+	- Expanded defines in Subroutines1.h for RDR12 and RDR24 to be more descriptive for future development and troubleshooting.
+	- Also added STOPMARGIN and STOPWIDTH defines to make calculations in Subroutines1 more clear.
+	- Changed TC7 to check direction of encoder which in turn changes whether the encoder checks on rising edge or falling edge.
+	- The encoder circuit changes between rising edge or falling edge whenever the encoder switches direction. This change should improve accuracy. 
+
+Rev 4.33	1-2-25		EBB		
+
+	- Added PID loop for Inspection camera. Should allow for smoother and slower speeds while operating camera.
+	- Rewrote code for Inspection Camera PWM to work with new PID loop.
+	- Added check to ensure saving variables only happens after sequence is in FinishState.
+
