@@ -1363,7 +1363,7 @@ void doevents ( void )
 
 					   //strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
 					  // getvalue(&PumpOnOff,0);
-					   update_menu_var_by_str(&PumpOnOff, "ON");
+					   update_menu_var_by_str(&PumpOnOff, " ON");
 					   
 					}
 					
@@ -1896,7 +1896,7 @@ void throwGhost(void)
 			//HeadOnOff.value=2;
 			//strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
 			//getvalue (&HeadOnOff,2);
-			update_menu_var_by_str(&HeadOnOff, "ON");
+			update_menu_var_by_str(&HeadOnOff, " ON");
 
 
 			Timer2 = 2 * RTI_One_Sec;    
@@ -1914,7 +1914,7 @@ void throwGhost(void)
 			//strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
 			//getvalue(&PumpOnOff,0);
 			//PumpOnOff.value=2;
-			update_menu_var_by_str(&PumpOnOff, "ON");
+			update_menu_var_by_str(&PumpOnOff, " ON");
 
 			Timer2 = 4 * RTI_One_Sec;
 			Display ( "Proc:Purging" );
