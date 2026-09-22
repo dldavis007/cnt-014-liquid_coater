@@ -114,9 +114,9 @@ extern struct menu_var MachineSize;
 extern char StackPointer;
 extern struct MenuStack MenuStackc[];
 extern char Menu[12][21];
-extern char CursorDownFlag;
-extern char CursorUpFlag;
-extern char SelectFlag;
+extern signed char CursorDownFlag;
+extern signed char CursorUpFlag;
+extern signed char SelectFlag;
 extern char CamAddressXmitd;
 
 extern char UpdateMenu;
@@ -606,7 +606,7 @@ void doevents ( void )
 		{
 			CursorDownFlag = 1;
 		}
-		else if ( CursorDownFlag == (char)-1 && !( TC0_RCVD_Data & TeleData_CamTog1 ) ){
+		else if ( CursorDownFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog1 ) ){
 			CursorDownFlag = 0;
 		}
 
@@ -615,7 +615,7 @@ void doevents ( void )
 			CursorUpFlag = 1;
 		}
 			
-		else if ( CursorUpFlag == (char)-1 && !( TC0_RCVD_Data & TeleData_CamTog2 ) ){
+		else if ( CursorUpFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog2 ) ){
 			CursorUpFlag = 0;
 		}
 			
@@ -624,7 +624,7 @@ void doevents ( void )
 			SelectFlag = 1;
 		}
 			
-		else if ( SelectFlag == (char)-1 && !( TC0_RCVD_Data & TeleData_PLCTrig ) ){
+		else if ( SelectFlag == -1 && !( TC0_RCVD_Data & TeleData_PLCTrig ) ){
 			SelectFlag = 0;	
 		}
                 
