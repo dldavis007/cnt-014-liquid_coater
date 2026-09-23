@@ -25,8 +25,7 @@ VERSION:   2.10, ESA 12-JAN-05
 #include "mco.h"
 #include "mcohw.h"
 #include "mc9s12a128.h" //david added in rev 4.29
-#include "Packets.h"
-#include "MenuSerialize.h"
+
 /**************************************************************************
 GLOBAL VARIABLES
 ***************************************************************************/ 

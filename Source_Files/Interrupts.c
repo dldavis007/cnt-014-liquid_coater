@@ -36,7 +36,7 @@ int HeadRampTimer;
 unsigned int MenuTimer = RTI_One_Sec * 2;
 unsigned int CamIndexTimer;
 unsigned int BlowerTimer;
-
+unsigned int CamTurnTimer;
 unsigned int CamStopTimer;
 unsigned int CamPIDTimer;
 extern int Rotate;
@@ -46,7 +46,6 @@ extern struct menu_var MaxLADist;
 extern struct menu_var CameraTurnTime;
 int CamPosition;
 char CamHome;
-unsigned int CamTurnTimer;
 
 extern int CamDegTimer;
 extern int HeaterTimer;

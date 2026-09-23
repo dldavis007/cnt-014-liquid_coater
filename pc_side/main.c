@@ -1,10 +1,10 @@
-/* main.c — PC-side host entry point for the 12/48 Coater Rev4.33 firmware.
+/* main.c — PC-side host entry point for the 12/48 Coater (true production Rev 4.33) firmware.
  *
  * Runs the REAL firmware main loop (doevents()) on a PC with live logging and
  * a UDP CAN bus, so the logic can be driven and observed without the HCS12 or
  * NOICE. Compiled by GCC with -DPC_SIDE; ImageCraft never sees this file.
  *
- * Init mirrors SourceFiles/Controller.c's main() minus the hardware bring-up
+ * Init mirrors Controller.c's main() minus the hardware bring-up
  * (InitPLL, PWMInit, AtoDInit): those busy-wait on status bits that never
  * change on a PC. EEInit() is stubbed in pc_side_host.c, and Load_Variables /
  * Load_Serial_Num / Load_Camera_Add are skipped under SKIP_EEPROM_LOAD because
@@ -16,7 +16,7 @@
  * Usage:  pc_side_host.exe [recv_port] [send_port]   (prompts if omitted)
  *         Defaults 20010 / 20100 = bind :20010, send to the shared
  *         can_udp_hub.py bus on :20100 alongside the other emulated nodes.
- *         Start the bus first:  python ../../../../CAN_RECEIVER_CODE/can_udp_hub.py
+ *         Start the bus first:  python can_hub_gui.py  (C:\Working_Projects\can_emulators)
  */
 
 #include <stdio.h>
@@ -48,7 +48,7 @@
 
 /* Defined in the firmware TUs but not declared in any header.
  * State is a `char` (Subroutines.c), so every coating-state value must stay
- * under 256 — PurgeRetractWaitErrorState is 110, comfortably inside. */
+ * under 256. */
 extern UNSIGNED8 gProcImg[];
 extern char      State;
 extern char      ghostState;
@@ -170,7 +170,6 @@ static const char *coat_state_name(int s)
     case HeadErrorState:             return "HeadErrorState";
     case HdErrHomeState:             return "HdErrHomeState";
     case HdErrStopState:             return "HdErrStopState";
-    case PurgeRetractWaitErrorState: return "PurgeRetractWaitErrorState";
     default:                         return "(unnamed)";
     }
 }

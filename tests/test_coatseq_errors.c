@@ -3,23 +3,15 @@
  * Every route INTO an error state, and what each error state then does.
  * State-to-state dispatch for the normal path lives in test_coatseq_states.c.
  *
- * The three error states:
- *   ErrorState                 (99)  "Warn:TIMEOUT ERROR" -> FinishState
- *   HeadErrorState            (100)  "Warn:HEAD ERROR"    -> HdErrHomeState (101)
- *   PurgeRetractWaitErrorState(110)  "Warn:PURGE TIMEOUT" -> FinishState
+ * The two error states in production 4.33:
+ *   ErrorState      (99)  "Warn:TIMEOUT ERROR" -> FinishState
+ *   HeadErrorState (100)  "Warn:HEAD ERROR"    -> HdErrHomeState (101)
+ * Both stop the head and the pump. (The refactored 4.33 adds a third,
+ * PurgeRetractWaitErrorState (110); it does not exist here - the
+ * PurgeRetractWait timeout goes to ErrorState, see test_purge_retract.c.)
  *
- * All three share the same post-conditions: stop the head, stop the pump.
- * That equivalence is the point of 110 existing - it is 99 with a message that
- * names the purge unit. Asserted head-to-head at the bottom of this file.
- *
- * Regression intent: every route asserted here behaves identically in 4.33
- * EXCEPT the PurgeRetractWait timeout, which went to ErrorState in 4.33 and to
- * PurgeRetractWaitErrorState in 4.34 (the 4.30a change). That single delta is
- * asserted in test_purge_retract.c and recorded in tests/REGRESSION.md.
- *
- * Note on turning things OFF: update_menu_var_by_str(&X,"OFF") works, because
- * "OFF" matches the enum token exactly. The "ON" direction is broken (see
- * REGRESSION.md); these suites use " ON" when they need something really on.
+ * Menu setters: update_menu_var_by_str/_by_value come from the harness here
+ * (test_support.h). The on/off enum is "OFF, ON", so ON is spelled " ON".
  */
 
 #include "unity.h"
@@ -242,44 +234,6 @@ static void test_headerrorstate_stops_everything_and_homes(void)
     TEST_ASSERT_EQUAL_UINT32(0, StateTime);
 }
 
-static void test_purgeerrorstate_stops_everything_and_finishes(void)
-{
-    State     = PurgeRetractWaitErrorState;
-    StateTime = 1234;
-    machine_running();
-
-    doevents();
-
-    TEST_ASSERT_EQUAL_STRING("Warn:PURGE TIMEOUT", last_display_message());
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (int)HeadOnOff.value, "head off");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (int)PumpOnOff.value, "pump off");
-    TEST_ASSERT_EQUAL_INT(FinishState, State);
-    TEST_ASSERT_EQUAL_UINT32(0, StateTime);
-}
-
-/* The reason 110 was added: same effects as 99, different message. If a future
- * change makes them diverge in anything but the text, this fails. */
-static void test_purge_error_and_generic_error_have_identical_effects(void)
-{
-    int  head_a, pump_a, state_a;
-    int  head_b, pump_b, state_b;
-
-    State = ErrorState;
-    machine_running();
-    doevents();
-    head_a = (int)HeadOnOff.value; pump_a = (int)PumpOnOff.value; state_a = State;
-
-    coat_test_begin();
-    State = PurgeRetractWaitErrorState;
-    machine_running();
-    doevents();
-    head_b = (int)HeadOnOff.value; pump_b = (int)PumpOnOff.value; state_b = State;
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(head_a,  head_b,  "head result must match");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(pump_a,  pump_b,  "pump result must match");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(state_a, state_b, "next state must match");
-}
-
 
 /* ==========================================================================
  * Head-error recovery chain: 100 -> 101 -> 102 -> FinishState
@@ -382,8 +336,6 @@ int main(void)
 
     RUN_TEST(test_errorstate_stops_everything_and_finishes);
     RUN_TEST(test_headerrorstate_stops_everything_and_homes);
-    RUN_TEST(test_purgeerrorstate_stops_everything_and_finishes);
-    RUN_TEST(test_purge_error_and_generic_error_have_identical_effects);
 
     RUN_TEST(test_hderrhome_both_branches_reach_hderrstop);
     RUN_TEST(test_hderrhome_holds_while_actuator_moving);

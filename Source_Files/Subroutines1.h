@@ -56,6 +56,4 @@ int CleanCoatSeq ( int Start );
 float GetRotationalSpeed(int current_angle, int previous_angle, float dt);
 float PID_Loop(struct PID* pid, float actual_value);
 
-
-
 #endif

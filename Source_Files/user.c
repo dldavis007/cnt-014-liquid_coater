@@ -198,7 +198,7 @@ UNSIGNED8 i;
   
   //Initiate Menu/Trigger
   // RPDO1, ID ($NODEID+0x200), 1 bytes
-  MCO_InitRPDO(1,0,8,OUT_digi_0); //Changed to 8 bytes and user 
+  MCO_InitRPDO(1,0,1,OUT_digi_0); 
 
   // RPDO2, ID ($NODEID+0x300), 2 bytes, Button box data 
   MCO_InitRPDO(2,0x180,3,OUT_digi_1); 
@@ -227,7 +227,7 @@ UNSIGNED8 i;
   // TPDO2, default ID ($NODEID+0x280), 0ms event, 100ms inhibit, 1 bytes, Pump motors
   MCO_InitTPDO(2,0x37c,0,100,1,IN_digi_1); 
 
-  // TPDO3, default ID ($NODEID+0x380), 0ms event, 100ms inhibit, 2 bytes, actuator
+  // TPDO3, default ID ($NODEID+0x380), 0ms event, 100ms inhibit, 3 bytes, actuator
   MCO_InitTPDO(3,0x36a,0,100,2,IN_digi_12); 
 
   //TPDO4, default ID ($NODEID+0x480), 0ms event, 100ms inhibit, 8 bytes, Heater
@@ -236,7 +236,7 @@ UNSIGNED8 i;
   //TPDO5, default ID ($NODEID+0x580), 0ms event, 100ms inhibit, 8 bytes, Heater
   MCO_InitTPDO(5,0x47e,0,100,8,IN_digi_23); 
   
-  //TPDO6, default ID ($NODEID+0x380), 0ms event, 100ms inhibit, 2 bytes, actuator
+  //TPDO6, default ID ($NODEID+0x380), 0ms event, 100ms inhibit, 3 bytes, actuator
   MCO_InitTPDO(6,0x46a,0,100,2,IN_digi_32);
 
 }

@@ -34,7 +34,7 @@ unsigned int rti_ticks(void);
  *
  *     Timer1 = RTI_One_Sec * .05;  while ( Timer1 );
  *
- * in Display(), PositionDisplay() and Packets.c's sendPackets(). Timer1 is
+ * in Display() and PositionDisplay(). Timer1 is
  * decremented ONLY by RTI_Int_Handler(), so on the host those spins never end
  * and the first Display() in the coating sequence hangs the suite. (Rev4.34
  * paces with MCOHW_GetTime instead, which the stubs below pin to "always
@@ -72,7 +72,7 @@ void set_la_commanded_pos(int tenths);
  * the way the firmware does. The mapping is 1:1 between revisions — Rev4.34's
  * config.c aliases exactly these three gProcImg regions:
  *
- *   menu_data    -> gProcImg[OUT_digi_0]   (8 bytes)  == 4.34 rpdo1_menu_data
+ *   menu_data    -> gProcImg[OUT_digi_0]   (1 byte in production 4.33; 8 in the refactored 4.33 / 4.34 rpdo1_menu_data)
  *   camera_addr  -> gProcImg[OUT_digi_8]   (2 bytes)  == 4.34 rpdo5_camera_addr
  *   camera_cmds  -> gProcImg[OUT_digi_10]  (5 bytes)  == 4.34 rpdo6_camera_cmds
  */
@@ -96,5 +96,12 @@ void reset_coat_sequence_state(void);
  * can_tx_log. Returns the most recent complete message, or "" if none.
  * Display frames are STX/data/ETX chunks, which is awkward to assert on raw. */
 const char *last_display_message(void);
+
+/* Menu-variable setters. The refactored revisions have these in firmware; the
+ * production 4.33 does not, so the harness supplies them using this firmware's
+ * own idiom (strncpy + getvalue, value + getstrval). */
+struct menu_var;
+int update_menu_var_by_str(struct menu_var *var, const char *new_str);
+int update_menu_var_by_value(struct menu_var *var, float new_value);
 
 #endif /* TEST_SUPPORT_H */

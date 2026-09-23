@@ -27,7 +27,7 @@ Modify these for your application
 **************************************************************************/
 
 // Define the size of the process image
-#define PROCIMG_SIZE 63
+#define PROCIMG_SIZE 55
 
 // Define process variables: offsets into the process image 
 // Menu Control
@@ -95,7 +95,7 @@ Modify these for your application
 #define IN_ana_2 31
 
 //Initiate Menu/Trigger
-//#define OUT_digi_0 33
+#define OUT_digi_0 33
 // Button Box Data
 #define OUT_digi_1 34
 // Button Box Data
@@ -128,6 +128,8 @@ Modify these for your application
 #define OUT_digi_15 48
 
 
+
+
 // Temperature Base
 #define OUT_ana_0 49
 // Temperature ISO
@@ -135,7 +137,5 @@ Modify these for your application
 // Temperature Hose
 #define OUT_ana_2 53
 
-
-#define OUT_digi_0 55
 
 #endif

@@ -15,8 +15,6 @@
 #include "mcohw.h"
 #include "EEProm.h"
 #include "string.h"
-#include "Packets.h"
-#include "MenuSerialize.h"
 
 int SenseLevel;
 char Stop_flag=0;
@@ -350,13 +348,10 @@ Start by moving to next position (extend or retract, depending on odd_even_count
 	{   //If not Start and not Moving, initiate next movement
     	if ( StrokeNum >= SecondStrokes.value || StrokeNum >= 10 )
 		{   //If done with full cycles, turn off pump
-			//strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
-			//getvalue(&PumpOnOff,0);
-			update_menu_var_by_str(&PumpOnOff, "OFF");
-
-			//PumpSpd.value = OldPumpSpeed;
-			//getstrval( &PumpSpd );
-			update_menu_var_by_value(&PumpSpd, OldPumpSpeed);
+			strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
+			getvalue(&PumpOnOff,0);
+			PumpSpd.value = OldPumpSpeed;
+			getstrval( &PumpSpd );
 		    return 1;
 		}
     	Cntr = SecondStrokeCtr[StrokeNum].value;
@@ -372,10 +367,8 @@ Start by moving to next position (extend or retract, depending on odd_even_count
 				
 			if ( !FirstStrokes.value )
 			{
-				//strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-    			//getvalue(&PumpOnOff,0);
-				update_menu_var_by_str(&PumpOnOff, "ON");
-
+				strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+    			getvalue(&PumpOnOff,0);
     			Pos = Cntr + ( Len/2 );
 			    odd_even_counter = 0; //Start a zero if no First Strokes
 			}	
@@ -389,9 +382,8 @@ Start by moving to next position (extend or retract, depending on odd_even_count
 		    Pos = Cntr + ( Len/2 );
 		}
 		//Set Pump speed, LAPos for most strokes
-		//PumpSpd.value = PumpSpeed;
-		//getstrval( &PumpSpd );
-		update_menu_var_by_value(&PumpSpd, PumpSpeed);
+		PumpSpd.value = PumpSpeed;
+		getstrval( &PumpSpd );
 		//Send move command
 		MoveLA ( Pos, LASpeed, LACurrent );
 		MoveCmdXmtd = 1;
@@ -535,13 +527,10 @@ Start by going to retracted position and start pumps, then extend to extended po
 		{   //If done with Center cycles, turn off pump 
 			if  ( !SecondStrokes.value ) //See if there are Second Strokes
 			{   //If no Second Strokes, turn pump off
-			    //strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
-				//getvalue(&PumpOnOff,0);
-				update_menu_var_by_str(&PumpOnOff, "OFF");
-
-				//PumpSpd.value = OldPumpSpeed;
-				//getstrval( &PumpSpd );
-				update_menu_var_by_value(&PumpSpd, OldPumpSpeed);
+			    strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
+				getvalue(&PumpOnOff,0);
+				PumpSpd.value = OldPumpSpeed;
+				getstrval( &PumpSpd );
 			}
 		    return 1;
 		}
@@ -551,9 +540,8 @@ Start by going to retracted position and start pumps, then extend to extended po
 		PumpSpeed = FirstStrokePmpSpd[StrokeNum].value;
 	    if ( StrokeNum == 0  )//Start pump at start of first stroke
 		{
-			//strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-			//getvalue(&PumpOnOff,0);
-			update_menu_var_by_str(&PumpOnOff, "ON");
+			strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+			getvalue(&PumpOnOff,0);
 		    Pos = Cntr + ( Len/2 );//First stroke ends at far end
 		    odd_even_counter = 0;
 		}
@@ -566,9 +554,8 @@ Start by going to retracted position and start pumps, then extend to extended po
 		    Pos = Cntr + ( Len/2 );
 		}
 		//Set Pump speed
-		//PumpSpd.value = PumpSpeed;
-		//getstrval( &PumpSpd );
-		update_menu_var_by_value(&PumpSpd, PumpSpeed);
+		PumpSpd.value = PumpSpeed;
+		getstrval( &PumpSpd );
 		//Send move command
 		MoveLA ( Pos, LASpeed, LACurrent );
 		MoveCmdXmtd = 1;
@@ -593,7 +580,6 @@ void doevents ( void )
     int i,j;
 		
 	   //if the 2-Wire system is working, start updating the 2-Wire Stack
-		send_serialized_menu(); // Send the serialized menu if ctx.status is not SERIALIZE_IDLE or SERLIALIZE_COMPLETE
 
 
 		if ( Store_Flag && State == FinishState) //To prevent timeout while exiting menu after changing settings during sequence -EBB
@@ -602,188 +588,173 @@ void doevents ( void )
             Save_Variables();
         }
 	   	  
-		if ( ( TC0_RCVD_Data & TeleData_CamTog1 ) && CursorDownFlag == 0 )
-		{
-			CursorDownFlag = 1;
-		}
-		else if ( CursorDownFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog1 ) ){
-			CursorDownFlag = 0;
-		}
-
-		
-		if ( ( TC0_RCVD_Data &  TeleData_CamTog2 ) && CursorUpFlag == 0 ){
-			CursorUpFlag = 1;
-		}
-			
-		else if ( CursorUpFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog2 ) ){
-			CursorUpFlag = 0;
-		}
+		    if ( ( TC0_RCVD_Data & TeleData_CamTog1 ) && CursorDownFlag == 0 )
+                CursorDownFlag = 1;
+            else if ( CursorDownFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog1 ) )
+                CursorDownFlag = 0;
+            
+            if ( ( TC0_RCVD_Data &  TeleData_CamTog2 ) && CursorUpFlag == 0 )
+                CursorUpFlag = 1;
+            else if ( CursorUpFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog2 ) )
+                CursorUpFlag = 0;
+            
+            if ( ( TC0_RCVD_Data & TeleData_PLCTrig ) && SelectFlag == 0 )
+                SelectFlag = 1;
+            else if ( SelectFlag == -1 && !( TC0_RCVD_Data & TeleData_PLCTrig ) )
+                SelectFlag = 0;
 			
 		
-		if ( ( TC0_RCVD_Data & TeleData_PLCTrig ) && SelectFlag == 0 ){
-			SelectFlag = 1;
-		}
-			
-		else if ( SelectFlag == -1 && !( TC0_RCVD_Data & TeleData_PLCTrig ) ){
-			SelectFlag = 0;	
-		}
-                
-		
-		if( MachineSize.value == 2 ) //24
-			gProcImg[IN_digi_22] = 0b00100101;  //Heater 1 (xxxxxx01) & 2 (xxxx01xx) = RTD 1,  Heater 3 (xx10xxxx) = RTD 2, RTD 3 not used
-		else
-			gProcImg[IN_digi_22] = 0b00011001;  //Heater 1 (xxxxxx01) & 3 (xx01xxxx) = RTD 1, Heater 2 (xxxx10xx) = RTD 2,  RTD 3 (not used)  
-		
-		gProcImg[IN_digi_15] = ((HtrBaseSetPnt.value)-32)*5/9;		 //Heater 1 = Base Set Point
-		if( HtrBaseOnOff.value == 1 )//off 
-			gProcImg[IN_digi_15] = 0;
+		   if( MachineSize.value == 2 ) //24
+	          gProcImg[IN_digi_22] = 0b00100101;  //Heater 1 (xxxxxx01) & 2 (xxxx01xx) = RTD 1,  Heater 3 (xx10xxxx) = RTD 2, RTD 3 not used
+		   else
+	          gProcImg[IN_digi_22] = 0b00011001;  //Heater 1 (xxxxxx01) & 3 (xx01xxxx) = RTD 1, Heater 2 (xxxx10xx) = RTD 2,  RTD 3 (not used)  
+		   
+           gProcImg[IN_digi_15] = ((HtrBaseSetPnt.value)-32)*5/9;		 //Heater 1 = Base Set Point
+           if( HtrBaseOnOff.value == 1 )//off 
+		   	  gProcImg[IN_digi_15] = 0;
 
-		gProcImg[IN_digi_16] = ((HtrISOSetPnt.value)-32)*5/9;    	 //Heater 2 = ISO Set Point
-		if ( HtrISOOnOff.value == 1 ) //off 
-			gProcImg[IN_digi_16] = 0;   
+           gProcImg[IN_digi_16] = ((HtrISOSetPnt.value)-32)*5/9;    	 //Heater 2 = ISO Set Point
+           if ( HtrISOOnOff.value == 1 ) //off 
+		   	  gProcImg[IN_digi_16] = 0;   
 
-		gProcImg[IN_digi_17] = ((32)-32)*5/9;   	 
-		if ( 1 ) gProcImg[IN_digi_17] = 0;	 			   		 //Heater 3 = Not Used 
+           gProcImg[IN_digi_17] = ((32)-32)*5/9;   	 
+           if ( 1 ) gProcImg[IN_digi_17] = 0;	 			   		 //Heater 3 = Not Used 
 
-		gProcImg[IN_digi_19] = PGainBase.value;			   	 	 //Heater 1 PID values (Base)
-		gProcImg[IN_digi_20] = (char)(IGainBase.value)*100+1;
-		gProcImg[IN_digi_21] = (IMaxBase.value / 100);     // originally 10-50 (instead of 1000-5000) because of 10to50function 
+           gProcImg[IN_digi_19] = PGainBase.value;			   	 	 //Heater 1 PID values (Base)
+           gProcImg[IN_digi_20] = (char)(IGainBase.value)*100+1;
+           gProcImg[IN_digi_21] = (IMaxBase.value);
 
-		gProcImg[IN_digi_23] = PGainISO.value;			   		 //Heater 2 PID values (ISO)
-		gProcImg[IN_digi_24] = (char)(IGainISO.value)*100+1;
-		gProcImg[IN_digi_25] = (IMaxISO.value / 100); 	     // originally 10-50 (instead of 1000-5000) because of 10to50function
+           gProcImg[IN_digi_23] = PGainISO.value;			   		 //Heater 2 PID values (ISO)
+           gProcImg[IN_digi_24] = (char)(IGainISO.value)*100+1;
+           gProcImg[IN_digi_25] = IMaxISO.value;
 
-		gProcImg[IN_digi_27] = (10);			   		 	 //Heater 3 PID values 
-		gProcImg[IN_digi_28] = (char)(0.03)*100+1;
-		gProcImg[IN_digi_29] = (20);
+           gProcImg[IN_digi_27] = (10);			   		 	 //Heater 3 PID values 
+           gProcImg[IN_digi_28] = (char)(0.03)*100+1;
+           gProcImg[IN_digi_29] = (20);
 
 
 		   	   
-		if ( TC0_RCVD_Data != ( gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1] ) )
-		{
-			TC0_RCVD_Data = gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1];
-			if ( MenuTimer < MenuTime )   
-				MenuTimer = 0;
-		}
-		if ( gProcImg[OUT_digi_0] & 0x01 && !(Gen_Flags & Gen_Flags_Menu_Active) )
-		{
-			Timer1 = RTI_One_Sec * .10;
-			while ( Timer1 );
-			gProcImg[IN_digi_0] |= 0x01;
-			
-			i = MCO_ProcessStack_Menu();
-			Timer1 = RTI_One_Sec * .10;
-			while ( Timer1 );
-			
-			gProcImg[OUT_digi_0] &= ~0x01;
-			
-			StackPointer = 0;
-			MenuStackc[StackPointer].Index[0] = 0;
-			MenuStackc[StackPointer].Index[1] = 0;
-			MenuStackc[StackPointer].Index[2] = 0;
-			MenuStackc[StackPointer].Index[3] = 0;
-			MenuStackc[StackPointer].CursorPos = 1;
-			MenuStackc[StackPointer].FirstLine = 0;
-			Gen_Flags |= Gen_Flags_Menu_Active;
-			
-			LoadMenu ( MenuStackc[StackPointer].Index );
-			InsertCursor ();
-			DisplayTitler ();			
-			TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
-			CursorDownFlag = 0;
-			CursorUpFlag = 0;
-			SelectFlag = 0;
+            if ( TC0_RCVD_Data != ( gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1] ) )
+            {
+                TC0_RCVD_Data = gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1];
+                if ( MenuTimer < MenuTime )   
+                   MenuTimer = 0;
+            }
+            if ( gProcImg[OUT_digi_0] & 0x01 && !(Gen_Flags & Gen_Flags_Menu_Active) )
+            {
+            	Timer1 = RTI_One_Sec * .10;
+            	while ( Timer1 );
+                gProcImg[IN_digi_0] |= 0x01;
+				
+				i = MCO_ProcessStack();
+            	Timer1 = RTI_One_Sec * .10;
+            	while ( Timer1 );
+                
+                gProcImg[OUT_digi_0] &= ~0x01;
+				
+				StackPointer = 0;
+                MenuStackc[StackPointer].Index[0] = 0;
+                MenuStackc[StackPointer].Index[1] = 0;
+                MenuStackc[StackPointer].Index[2] = 0;
+                MenuStackc[StackPointer].Index[3] = 0;
+                MenuStackc[StackPointer].CursorPos = 1;
+                MenuStackc[StackPointer].FirstLine = 0;
+                Gen_Flags |= Gen_Flags_Menu_Active;
+                
+                LoadMenu ( MenuStackc[StackPointer].Index );
+                InsertCursor ();
+                DisplayTitler ();			
+                TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
+    			CursorDownFlag = 0;
+    			CursorUpFlag = 0;
+    			SelectFlag = 0;
 
-			//gProcImg[IN_digi_0] |= 0x01;
-		}
+				//gProcImg[IN_digi_0] |= 0x01;
+            }
 
            
             
-		if ( !MenuTimer )
-		{
-			MenuTimer = MenuTime;
-			
-			if ( Gen_Flags & Gen_Flags_Menu_Active )
-			{
-				//Limit the Center and Length setting according to MaxLADist and to each other
-					//Length has to be less than 2 times the center, etc...
-					int i;
-					//Check coating lengths while menu is active
-					for (i=0;i<10;i++)
+	       if ( !MenuTimer )
+		   {
+			   MenuTimer = MenuTime;
+			   
+	   	   	   if ( Gen_Flags & Gen_Flags_Menu_Active )
+			   {
+        			//Limit the Center and Length setting according to MaxLADist and to each other
+			         //Length has to be less than 2 times the center, etc...
+					 int i;
+			    	 //Check coating lengths while menu is active
+			    	 for (i=0;i<10;i++)
+					 {
+				 	    CkCntrLength(FirstStrokeLen+i);
+						CkCntrLength(SecondStrokeLen+i);
+					 }
+					
+					if ( CursorDownFlag )
 					{
-					CkCntrLength(FirstStrokeLen+i);
-					CkCntrLength(SecondStrokeLen+i);
+           				CursorDown ();
+						CursorDownFlag = -1;
 					}
+    				if ( CursorUpFlag )
+					{
+           				CursorUp ();
+						CursorUpFlag = -1;
+					}					
 				
-				if ( CursorDownFlag )
-				{
-					CursorDown ();
-					CursorDownFlag = -1;
-				}
-				if ( CursorUpFlag )
-				{
-					CursorUp ();
-					CursorUpFlag = -1;
-				}					
+           			if ( SelectFlag )
+					{
+   					    MenuTimer = MenuTime * 2; //briefly disable select after menu is selected
+           				Select ();          //select menu item at cursor position
+						SelectFlag = -1;
+					}					 
+					
+				    {
+        			    char tempstr[4];
+        			    sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_0] )  *  9 / 5 + 32 ) );
+        				if ( atoi( tempstr ) != ( HtrBaseTemp.value ) )
+						{
+        				    
+                            
+							if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
+        					     MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
+								 strcmp ( HtrBaseTemp.str_value, tempstr) && !HeaterTimer )
+						    {
+									 UpdateMenu = 1;
+        							 HtrBaseTemp.value = atoi(tempstr);
+									 strcpy ( HtrBaseTemp.str_value, tempstr);
+							}
+						}
+        			    sprintf (tempstr, "%3.0f", ( (float)( gProcImg[OUT_ana_1] ) *  9 / 5 + 32 ) );
+        				if ( atoi( tempstr ) != ( HtrISOTemp.value ) )
+        				{
+							
+                            if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
+        					     MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
+								 strcmp ( HtrISOTemp.str_value, tempstr) && !HeaterTimer )
+							{
+        				    	     UpdateMenu = 1;
+        							 HtrISOTemp.value = atoi(tempstr);
+									 strcpy ( HtrISOTemp.str_value, tempstr);
+							}
+						}
+        			    sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_2] ) *  9 / 5 + 32 ) );
+        			}
+				   				   			   
+				    if ( UpdateMenu )
+				    {
+                       LoadMenu ( MenuStackc[StackPointer].Index );
+                       if ( !Variable_flag )
+					       InsertCursor ();
+                       DisplayTitler ();
+					   UpdateMenu = 0;
+				    }
+				}			   
+		    }		
 			
-				if ( SelectFlag )
-				{
-					MenuTimer = MenuTime * 2; //briefly disable select after menu is selected
-					Select ();          //select menu item at cursor position
-					SelectFlag = -1;
-				}					 
-				
-				{
-					char tempstr[4];
-					sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_0] )  *  9 / 5 + 32 ) );
-					if ( atoi( tempstr ) != ( HtrBaseTemp.value ) )
-					{
-						
-						
-						if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
-								MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
-								strcmp ( HtrBaseTemp.str_value, tempstr) && !HeaterTimer )
-						{
-									UpdateMenu = 1;
-									//HtrBaseTemp.value = atoi(tempstr);
-									//strcpy ( HtrBaseTemp.str_value, tempstr);
-									update_menu_var_by_str(&HtrBaseTemp, tempstr);
-
-						}
-					}
-					sprintf (tempstr, "%3.0f", ( (float)( gProcImg[OUT_ana_1] ) *  9 / 5 + 32 ) );
-					if ( atoi( tempstr ) != ( HtrISOTemp.value ) )
-					{
-						
-						if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
-								MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
-								strcmp ( HtrISOTemp.str_value, tempstr) && !HeaterTimer )
-						{
-									UpdateMenu = 1;
-									//HtrISOTemp.value = atoi(tempstr);
-									//strcpy ( HtrISOTemp.str_value, tempstr);
-									update_menu_var_by_str(&HtrISOTemp, tempstr);
-
-						}
-					}
-					sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_2] ) *  9 / 5 + 32 ) );
-				}
-											
-				if ( UpdateMenu )
-				{
-					LoadMenu ( MenuStackc[StackPointer].Index );
-					if ( !Variable_flag )
-						InsertCursor ();
-					DisplayTitler ();
-					UpdateMenu = 0;
-				}
-			}			   
-		}		
-		
-		if ( ( MachineSize.value ) == 2 ) //24
-				RDR_Ratio = RDR24;
-		else
-				RDR_Ratio = RDR12;
+			if ( ( MachineSize.value ) == 2 ) //24
+			 	 RDR_Ratio = RDR24;
+	   		else
+			     RDR_Ratio = RDR12;
 			
 
 			//Time Calculation for dt in cam PID loop
@@ -805,41 +776,41 @@ void doevents ( void )
 
 			
 
-		if(CamPIDTimer < PrevCamPIDTime){ // Fix wraparound for PID Timer
-			CamPIDTimer = 65535 - PrevCamPIDTime;
-			PrevCamPIDTime = 0;
-		}
+			if(CamPIDTimer < PrevCamPIDTime){ // Fix wraparound for PID Timer
+				CamPIDTimer = 65535 - PrevCamPIDTime;
+				PrevCamPIDTime = 0;
+			}
 			
 
-		inspect_cam_PID.dT = (CamPIDTimer - PrevCamPIDTime)/RTI_One_Sec; // Calculate dT for inspect_cam
+			inspect_cam_PID.dT = (CamPIDTimer - PrevCamPIDTime)/RTI_One_Sec; // Calculate dT for inspect_cam
 
 
-		if(inspect_cam_PID.dT >= min_dt){ // Make sure enough time has passed so that the loops arent insanely short
-			
-			PrevCamPIDTime = CamPIDTimer;
-			Cam_speed = GetRotationalSpeed(CamPosition,PrevCamPos,inspect_cam_PID.dT); 
-			PrevCamPos = CamPosition;
+			if(inspect_cam_PID.dT >= min_dt){ // Make sure enough time has passed so that the loops arent insanely short
+				
+				PrevCamPIDTime = CamPIDTimer;
+				Cam_speed = GetRotationalSpeed(CamPosition,PrevCamPos,inspect_cam_PID.dT); 
+				PrevCamPos = CamPosition;
 
-			if ((fabs(Cam_speed) < 0.1) && (CurrentCamPWM > 0) && (inspect_cam_PID.desired_value < 1)){
-				CurrentCamPWM = 0; // If PWM is low and speed is desired to be 0 then set PWM to 0
+ 				if ((fabs(Cam_speed) < 0.1) && (CurrentCamPWM > 0) && (inspect_cam_PID.desired_value < 1)){
+					CurrentCamPWM = 0; // If PWM is low and speed is desired to be 0 then set PWM to 0
+
+				}
+				else{//business as usual
+
+					inspectPIDChange = (int)((PID_Loop(&inspect_cam_PID,Cam_speed)));
+
+					if(CurrentCamPWM + inspectPIDChange > 100){ //Cap PWM at 100.
+						CurrentCamPWM = 100;
+					}
+					else if(CurrentCamPWM + inspectPIDChange <= 0){ // Limit PWM at 0.
+						CurrentCamPWM = 0;
+					}
+					else{ // Add PID change like normal
+						CurrentCamPWM = CurrentCamPWM + (char)inspectPIDChange; 
+					}
+				}
 
 			}
-			else{//business as usual
-
-				inspectPIDChange = (int)((PID_Loop(&inspect_cam_PID,Cam_speed)));
-
-				if(CurrentCamPWM + inspectPIDChange > 100){ //Cap PWM at 100.
-					CurrentCamPWM = 100;
-				}
-				else if(CurrentCamPWM + inspectPIDChange <= 0){ // Limit PWM at 0.
-					CurrentCamPWM = 0;
-				}
-				else{ // Add PID change like normal
-					CurrentCamPWM = CurrentCamPWM + (char)inspectPIDChange; 
-				}
-			}
-
-		}
 
 
 			
@@ -1217,9 +1188,8 @@ void doevents ( void )
 					HeadSpeed = 0;
 				    Cycle_Complete = 0;
                     Display ( "Proc:Coating" );
-    				//strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,2);
-					update_menu_var_by_str(&HeadOnOff, "ON");
+    				strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,2);
 
                 	gTxMsg.ID = 0x361; 		 //make sure purge unit (ghostcup) is retracted
 	        		gTxMsg.LEN = 1;
@@ -1357,13 +1327,10 @@ void doevents ( void )
 					if (RetractTime.value)
 					{
 					   OldPumpSpeed = PumpSpd.value;
-					   //PumpSpd.value = 75;
-					  // getstrval( &PumpSpd );
-					update_menu_var_by_value(&PumpSpd, 75.0);
-
-					   //strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-					  // getvalue(&PumpOnOff,0);
-					   update_menu_var_by_str(&PumpOnOff, " ON");
+					   PumpSpd.value = 75;
+					   getstrval( &PumpSpd );
+					   strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+					   getvalue(&PumpOnOff,0);
 					   
 					}
 					
@@ -1371,8 +1338,7 @@ void doevents ( void )
 					{
     					CleanCoatSeq ( 1 );
     			    	StateTime = 0;
-                        //PumpOnOff.value = 1;
-						update_menu_var_by_str(&PumpOnOff, "OFF");						
+                        PumpOnOff.value = 1;						
     			    	State++;
 					}
 				break;
@@ -1390,11 +1356,9 @@ void doevents ( void )
 				break;
 				
 				case HomeState:
-    				//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,1);
-					//HeadOnOff.value = 1;
-
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 					
 					if ( !gProcImg[OUT_digi_7] )//skip if moving
 					{
@@ -1455,13 +1419,12 @@ void doevents ( void )
                     Display ( "Warn:TIMEOUT ERROR" );
 					Update_Menu_Timer = 5 * RTI_One_Sec;
 
-    				//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,1);
-					//HeadOnOff.value = 1;
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 
-                    //PumpOnOff.value = 1;
-					update_menu_var_by_str(&PumpOnOff, "OFF");
+                    PumpOnOff.value = 1;
+
 					State = FinishState;
 				break;
 				
@@ -1470,13 +1433,11 @@ void doevents ( void )
                     Display ( "Warn:HEAD ERROR" );
 					Update_Menu_Timer = 5 * RTI_One_Sec;
 
-    				//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,1);
-					//HeadOnOff.value = 1;
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 
-                    //PumpOnOff.value = 1;
-					update_menu_var_by_str(&PumpOnOff, "OFF");
+                    PumpOnOff.value = 1;
 
 					State++;
 				break;
@@ -1507,14 +1468,14 @@ void doevents ( void )
 
 				case PurgeRetractWaitErrorState:
 				    StateTime = 0;
-					// TODO change display message, maybe something like PURGE EXT ERR to indicate that
-					// the software thinks the purge unit is still extended
                     Display ( "Warn:PURGE TIMEOUT" );
 					Update_Menu_Timer = 5 * RTI_One_Sec;
 
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 
-					update_menu_var_by_str(&PumpOnOff, "OFF");
+                    PumpOnOff.value = 1;
 
 					State = FinishState;
 				break;
@@ -1528,7 +1489,7 @@ void doevents ( void )
 			throwGhost();		//call sequence to throw ghost band
 
        		// Operate on CANopen protocol stack
-       		i = MCO_ProcessStack_Menu();
+       		i = MCO_ProcessStack();
 	   		//End MicroCanOpen Stack   
 	   
 
@@ -1538,20 +1499,14 @@ void doevents ( void )
 void CameraMain1 ( void )
 {
   int i;
-	char tempstr[12];
+	
 	//light value is set in settings menu 0 - 100% duty
     //PWMDTY1 = atoi ( LightLevel1 ) * atoi (LightLevel1);
 
     ++ran_num;      //random number used for camera address
 
-        sprintf(tempstr, "%04X", cam_add1);
-
-        // ensure null termination
-        tempstr[sizeof(tempstr)-1] = '\0'; 
-
-        // Update the value member of the variable in the python GUI
-        update_menu_var_by_str(&disp_add1, tempstr); 
-
+	    sprintf ( disp_add1.str_value, "%04X", cam_add1 );    //for video diplay of camera address
+        
         if ( (gProcImg[OUT_digi_10] & 0x08) &&              //command to activate menu
             (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
                 (gProcImg[OUT_digi_12]<< 8 ==  (cam_add1 & 0xFF00)) &&
@@ -1580,7 +1535,7 @@ void CameraMain1 ( void )
             Timer1 = RTI_One_Sec * .10;
             while ( Timer1 );
             gProcImg[IN_digi_0] |= 0x01;
-            i = MCO_ProcessStack_Menu();
+            i = MCO_ProcessStack();
             Timer1 = RTI_One_Sec * .10;
             while ( Timer1 );
             
@@ -1668,23 +1623,14 @@ void CameraMain1 ( void )
 void CameraMain2 ( void )
 {
     int i;
-	char tempstr[12];
+	
 	//light value is set in settings menu 0 - 100% duty
     //PWMDTY1 = atoi ( LightLevel2 ) * atoi (LightLevel2);
 
     ++ran_num;      //random number used for camera address
 
-	   // sprintf ( disp_add2.str_value, "%04X", cam_add2 );    //for video diplay of camera address
+	    sprintf ( disp_add2.str_value, "%04X", cam_add2 );    //for video diplay of camera address
         
-	   	    //for video diplay of camera address
-        sprintf(tempstr, "%04X", cam_add2);
-
-        // ensure null termination
-        tempstr[sizeof(tempstr)-1] = '\0'; 
-
-        // Update the value member of the variable in the python GUI
-        update_menu_var_by_str(&disp_add2, tempstr); 
-
         if ( (gProcImg[OUT_digi_10] & 0x08) &&              //command to activate menu
             (gProcImg[OUT_digi_11] == (cam_add2 & 0x00FF)) &&         //lsb - old address
                 (gProcImg[OUT_digi_12]<< 8 ==  (cam_add2 & 0xFF00)) &&
@@ -1713,7 +1659,7 @@ void CameraMain2 ( void )
             Timer1 = RTI_One_Sec * .10;
             while ( Timer1 );
             gProcImg[IN_digi_0] |= 0x01;
-            i = MCO_ProcessStack_Menu();
+            i = MCO_ProcessStack();
             Timer1 = RTI_One_Sec * .10;
             while ( Timer1 );
             
@@ -1894,11 +1840,8 @@ void throwGhost(void)
 
         case 7:		    //turn on head
 			//HeadOnOff.value=2;
-			//strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
-			//getvalue (&HeadOnOff,2);
-			update_menu_var_by_str(&HeadOnOff, " ON");
-
-
+			strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
+			getvalue (&HeadOnOff,2);
 			Timer2 = 2 * RTI_One_Sec;    
             ++ghostState; 
 			break;
@@ -1911,11 +1854,9 @@ void throwGhost(void)
 			break;
 			
 		case 9:		    //turn on pump
-			//strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-			//getvalue(&PumpOnOff,0);
-			//PumpOnOff.value=2;
-			update_menu_var_by_str(&PumpOnOff, " ON");
-
+			strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+			getvalue(&PumpOnOff,0);
+			PumpOnOff.value=2;
 			Timer2 = 4 * RTI_One_Sec;
 			Display ( "Proc:Purging" );
 			++ghostState;
@@ -1929,8 +1870,7 @@ void throwGhost(void)
 			break;
 			
 		case 11:		    //turn off pump
-			update_menu_var_by_str(&PumpOnOff, "OFF");
-			//PumpOnOff.value=1;
+			PumpOnOff.value=1;
 			Timer2 = 15 * RTI_One_Sec;
             ++ghostState;
 			break;
@@ -1943,12 +1883,9 @@ void throwGhost(void)
 			break;
 
 		case 13:		//turn off head
-			//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-			//getvalue (&HeadOnOff,1);
-			//HeadOnOff.value=1;
-			update_menu_var_by_str(&HeadOnOff, "OFF");
-
-
+			strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+			getvalue (&HeadOnOff,1);
+			HeadOnOff.value=1;
 			Timer2 = 5 * RTI_One_Sec;
             ++ghostState;
 			break;
@@ -2047,88 +1984,4 @@ float PID_Loop(struct PID* pid, float actual_value) {
     pid->previous_error = error;
 
 	return output;
-}
-
-int update_menu_var_by_value(struct menu_var *var, float new_value) {
-    // This function updates a menu variable's value, then updates the str_value
-    // and notifies the GUI of the change. Standard wrapper function for updating menu variables.
-    // companion to update_menu_var_by_str
-    if (var == NULL) {
-        return -1; // Error: variable is NULL
-    }
-
-
-    // Check if the new value is within the allowed range
-    if (new_value < var->min || new_value > var->max) {
-        return -1; // Error: value out of bounds
-    }
-
-    // No update needed if the value is the same
-    if (var->value == new_value) {
-        return 0; 
-    }
-
-
-    // Directly update the variable's value
-    var->value = new_value;
-   
-    // Update the string representation if applicable
-    getstrval(var);
-   
-    // Notify the GUI of the change, returns -1 if fails, 0 if success
-    if (update_value_gui(var)){
-        return -1;
-    }
-
-
-    return 0; // Success
-}
-
-
-
-
-int update_menu_var_by_str(struct menu_var *var, const char *new_str) {
-    // This function updates a menu variable's str_value, then updates the value
-    // and notifies the GUI of the change. Standard wrapper function for updating menu variables.
-    if (var == NULL || new_str == NULL) {
-        return -1; // Error: variable or new string is NULL
-    }
-
-    // if old string is the same as new string, no update needed
-    if (strcmp(var->str_value, new_str) == 0) {
-        return 0; 
-    }
-   
-    // Copy the new string value
-    sprintf(var->str_value, "%s", new_str);
-   
-    // Update the numeric representation if applicable
-    getvalue(var, 0);
-   
-    // Notify the GUI of the change, returns -1 if fails, 0 if success
-    if (update_value_gui(var)){
-        return -1;
-    }
-
-
-    return 0;
-}
-
-
-int SkipVarFunction ( void )
-{
-    int i;
-	struct menu_var *var;
-	
-	if ( !Variable_flag ) //Here the first time select is pushed
-	{
-	    i = FindMenu(); 
-	    var = Menuc[i].VarPntr[MenuStackc[StackPointer].CursorPos+MenuStackc[StackPointer].FirstLine-1];
-	    //var is the 1st variable pointed to in the menu
-		next_variable( var );
-		
-		Variable_flag = 1;
-	}
-    
-	return StdVarFunction();
 }

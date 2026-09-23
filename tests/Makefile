@@ -1,5 +1,5 @@
 # =============================================================================
-# Makefile — 12/48 Coater (Rev4.33) host-side unit tests (Unity)
+# Makefile — 12/48 Coater (true production Rev 4.33) host-side unit tests (Unity)
 #
 # Prerequisites
 # -------------
@@ -24,14 +24,11 @@
 # maps INTR_ON/OFF (cli/sei) onto a flag before hc12def.h/Controller.h/mcohw.h
 # can define them.
 #
-# Rev4.33 vs Rev4.34
-# ------------------
-# Rev4.33 is the pre-refactor layout: everything lives in SourceFiles/ and there
-# is NO dependency on the shared ../../../../Library tree — this unit carries its
-# own mco.c, user.c, Interrupts.c, Packets.c and MenuSerialize.c. So unlike
-# Rev4.34's tests/Makefile there is no LIBDRV/LIBINC split and no -idirafter:
-# one include path covers it, and the ImageCraft C library headers that forced
-# -idirafter over there are not on it.
+# Layout
+# ------
+# The production 4.33: every source sits in Source_Files/ (no Library, no
+# Packets.c / MenuSerialize.c), so SRC is that folder.
+# CRTS_Refactored's Rev4.33 is a later, unreleased revision - see ../README.md.
 #
 # Deliberately NOT compiled:
 #   Controller.c  holds main() and the hardware bring-up; hardware_stubs.c's
@@ -54,7 +51,7 @@ CC      := gcc
 # (cmd wants .\prog.exe, sh wants ./prog.exe). The clean recipe needs cmd's del.
 SHELL   := cmd.exe
 
-SRC     := ../SourceFiles
+SRC     := ../Source_Files
 
 # Warnings off on production TUs: that code is read-only here and its warnings
 # are noise we cannot act on. -funsigned-char matches the ICC12 default char
@@ -81,8 +78,7 @@ LDFLAGS := -m32 -Wl,--gc-sections -Wl,--allow-multiple-definition
 BUILD   := build
 
 UNIT_OBJS := $(BUILD)/Subroutines.o $(BUILD)/Subroutines1.o $(BUILD)/mco.o \
-             $(BUILD)/user.o $(BUILD)/Interrupts.o $(BUILD)/MenuSerialize.o \
-             $(BUILD)/Packets.o
+             $(BUILD)/user.o $(BUILD)/Interrupts.o
 STUB_OBJ  := $(BUILD)/hardware_stubs.o
 UNITY_OBJ := $(BUILD)/unity.o
 SHARED_OBJS := $(STUB_OBJ) $(UNIT_OBJS) $(UNITY_OBJ)

@@ -10,12 +10,12 @@
  *     status bits that never change here
  *   - the CAN transport: MCOHW_PushMessage / MCOHW_PullMessage over UDP, so the
  *     firmware exchanges real CAN frames with the Python emulators in
- *     emulators/ (same wire format as can_udp.py)
+ *     C:\Working_Projects\can_emulators (same wire format as lib/can_udp.py)
  *   - the RTI simulation thread: drives the real RTI_Int_Handler() so firmware
  *     timers (StateTime, Timer1/2, MenuTimer, ...) count down
  *
  * The REAL menu engine, MicroCANopen stack and node config (Subroutines.c,
- * Subroutines1.c, MenuSerialize.c, Packets.c, mco.c, user.c, Interrupts.c) are
+ * Subroutines1.c, mco.c, user.c, Interrupts.c) are
  * compiled in, so MCO_ProcessStack genuinely maps RPDOs into gProcImg[] and
  * emits TPDOs. This file only supplies the CAN hardware layer beneath them.
  *
@@ -23,7 +23,7 @@
  * ------------------
  * Rev4.33 paces its CAN display frames with Timer1 busy-waits
  * (`Timer1 = RTI_One_Sec * .05; while (Timer1);` in Display(), and the same
- * shape in Packets.c). Those are NOT #ifdef'd out for the host build the way
+ * shape elsewhere). Those are NOT #ifdef'd out for the host build the way
  * Rev4.34's MCOHW_GetTime pacing is — the RTI thread below decrements Timer1
  * exactly as the target's real RTI interrupt does, so the spins simply end.
  * That keeps the production pacing code on the host path instead of compiling
@@ -54,7 +54,7 @@
 #include "Interrupts.h"     /* RTI_One_Sec: ticks/sec the firmware assumes */
 #include "pc_log.h"
 
-void RTI_Int_Handler(void);   /* production ISR, SourceFiles/Interrupts.c */
+void RTI_Int_Handler(void);   /* production ISR, ../Interrupts.c */
 
 /* ==========================================================================
  * SFR backing array + host runtime globals
@@ -110,7 +110,7 @@ UNSIGNED8 MCOHW_IsTimeExpired(UNSIGNED16 timestamp)
  * CAN transport over UDP
  *
  * Wire format, one datagram per frame (length = 3 + LEN) — must match
- * emulators/can_udp.py:
+ * can_emulators' lib/can_udp.py:
  *   byte 0-1 : CAN ID   (uint16, little-endian)
  *   byte 2   : LEN      (0..8)
  *   byte 3.. : LEN data bytes
@@ -375,7 +375,7 @@ UNSIGNED8 MCOHW_PullMessage(CAN_MSG *m)
  * firmware's INTR_OFF()/INTR_ON() critical sections real meaning here.
  *
  * On Rev4.33 this thread is load-bearing, not just a convenience: Display(),
- * PositionDisplay() and Packets.c's sendPackets() pace their CAN frames with
+ * and PositionDisplay() pace their CAN frames with
  * `Timer1 = <n>; while (Timer1);`, and Timer1 is decremented ONLY by
  * RTI_Int_Handler(). Without these ticks the first Display() call in the
  * coating sequence spins forever.

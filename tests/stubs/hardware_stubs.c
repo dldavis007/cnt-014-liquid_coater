@@ -1,6 +1,6 @@
 /* hardware_stubs.c
  *
- * Host-side definitions needed to link the Rev4.33 production sources under
+ * Host-side definitions needed to link the production Rev 4.33 sources under
  * host GCC. Provides ONLY what the compiled translation units reference but do
  * not define themselves (found by trial link):
  *
@@ -11,8 +11,7 @@
  *   - the CAN hardware layer (MCOHW_*); mcohw.c is likewise not compiled
  *
  * The real menu engine, MicroCANopen stack, node config and RTI ISR
- * (Subroutines.c, Subroutines1.c, MenuSerialize.c, Packets.c, mco.c, user.c,
- * Interrupts.c) ARE compiled, so tests exercise genuine PDO mapping and menu
+ * (Subroutines.c, Subroutines1.c, mco.c, user.c, Interrupts.c) ARE compiled, so tests exercise genuine PDO mapping and menu
  * behaviour.
  *
  * IMPORTANT — two different blocking mechanisms are neutralised here:
@@ -20,7 +19,7 @@
  *   1. MCOHW_GetTime() returns 0 and MCOHW_IsTimeExpired() returns 1 (always
  *      "expired"), so anything pacing off the MCO time base falls through.
  *
- *   2. Rev4.33's Display()/PositionDisplay()/sendPackets() pace with
+ *   2. Rev4.33's Display()/PositionDisplay() pace with
  *      `Timer1 = <n>; while (Timer1);`, and Timer1 moves only under
  *      RTI_Int_Handler(). The pacing thread at the bottom of this file
  *      services Timer1 and nothing else, so those spins end without
@@ -60,7 +59,7 @@
 #include "procimg.h"
 #include "test_support.h"
 
-void RTI_Int_Handler(void);   /* production ISR in SourceFiles/Interrupts.c */
+void RTI_Int_Handler(void);   /* production ISR in ../Interrupts.c */
 
 /* ==========================================================================
  * SFR backing array + host runtime globals
@@ -164,7 +163,7 @@ int putchar(int c)
 /* ==========================================================================
  * Firmware bring-up for tests.
  *
- * Mirrors SourceFiles/Controller.c's main(), minus the hardware bring-up
+ * Mirrors Controller.c's main(), minus the hardware bring-up
  * (InitPLL, PWMInit, AtoDInit) which spins on status bits that never change on
  * a PC, and minus the EEPROM loads (SKIP_EEPROM_LOAD) which are reached through
  * absolute addresses Windows cannot map — so the unit comes up on its
@@ -227,6 +226,22 @@ static void bind_signal_blocks(void)
     menu_data   = &gProcImg[OUT_digi_0];
     camera_addr = &gProcImg[OUT_digi_8];
     camera_cmds = &gProcImg[OUT_digi_10];
+}
+
+/* Menu-variable setters (see test_support.h): the firmware's own idiom, as
+ * Subroutines1.c uses it - strncpy + getvalue, or value + getstrval. */
+int update_menu_var_by_str(struct menu_var *var, const char *new_str)
+{
+    strncpy(var->str_value, new_str, var->len_str);
+    getvalue(var, 0);
+    return 1;
+}
+
+int update_menu_var_by_value(struct menu_var *var, float new_value)
+{
+    var->value = new_value;
+    getstrval(var);
+    return 1;
 }
 
 /* The sequence keeps progress in file-scope globals that outlive one test. */
@@ -357,8 +372,8 @@ const char *last_display_message(void)
 /* ==========================================================================
  * Timer1 pacing service — Rev4.33 only. See test_support.h for the rationale.
  *
- * Services ONLY Timer1, so the production `while (Timer1)` spins in Display(),
- * PositionDisplay() and sendPackets() complete while every other firmware timer
+ * Services ONLY Timer1, so the production `while (Timer1)` spins in Display()
+ * and PositionDisplay() complete while every other firmware timer
  * stays under deterministic advance_ticks() control.
  *
  * Zeroing Timer1 rather than decrementing it: the spins only test for zero, and

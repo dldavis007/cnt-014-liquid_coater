@@ -17,9 +17,8 @@
  * SFRs, which under PC_SIDE are just bytes in sfr_regs[], so tests read them
  * back directly.
  *
- * Regression intent: CameraMain1/2 are unchanged between 4.33 and 4.34 apart
- * from the gProcImg -> rpdo pointer refactor, so everything here is shared
- * contract. See tests/REGRESSION.md.
+ * Carried over from the refactored 4.33 suite; every test passes unchanged
+ * against the production 4.33.
  */
 
 #include "unity.h"
