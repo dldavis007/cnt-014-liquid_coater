@@ -15,9 +15,12 @@
 #include "mcohw.h"
 #include "EEProm.h"
 #include "string.h"
+#include "pc_log.h"
 
 int SenseLevel;
 char Stop_flag=0;
+
+unsigned int activeCamAddress;
 
 extern char save_serial_flag;
 extern char Gen_Flags;
@@ -1167,13 +1170,36 @@ void doevents ( void )
 			
             if ( gProcImg[OUT_digi_0] & 0x02 )
 			{
-			    if ( VSEL_PORT & CAM_ON )
-                {
-			        if ( State == FinishState && !ghostState )
-				        State = TrigState;
+				if (VSEL_PORT & CAM_ON && HDSDSetting.value == 1){
+					
+					if ( State == FinishState && !ghostState ){
+						State = TrigState;
+					}
+				}		
+				else if (HDSDSetting.value == 2){ // if hdsd setting is 2 it means hd setting is on
+					if ( State == FinishState && !ghostState ){
+						// send 521 message to active camera to query if it's trig mode is this unit
+						gTxMsg.ID = 0x521;
+						gTxMsg.LEN = 4; 
+						gTxMsg.BUF[0] = 0x08; // query trig mode
+						gTxMsg.BUF[1] = activeCamAddress; // address of active camera
+						gTxMsg.BUF[2] = activeCamAddress >> 8;      
+						gTxMsg.BUF[3] = NODE_ID;   // id of triggerable unit asking for trigger
+						if (!MCOHW_PushMessage(&gTxMsg))
+						{
+							// failed to transmit
+							MCOUSER_FatalError(0x8801);
+						}
+						
+						// State = TrigState;
+					}
+							
 				}
-                gProcImg[OUT_digi_0] &=  ~0x02;				
-            }			
+
+				gProcImg[OUT_digi_0] &=  ~0x02;	
+			}
+			
+                					
 			
 			if ( 1 ) // LA home etc.
 			{
@@ -1595,7 +1621,7 @@ void CameraMain1 ( void )
 		while(Timer1);
         
         gTxMsg.ID = 0x2a1;
-        gTxMsg.LEN = 2; 
+        gTxMsg.LEN = 3; 
         gTxMsg.BUF[0] = cam_add1;
         gTxMsg.BUF[1] = cam_add1 >> 8;      
         if (!MCOHW_PushMessage(&gTxMsg))
@@ -1616,6 +1642,10 @@ void CameraMain1 ( void )
         cam_addx1[1] = cam_add1>>8;
         Save_Camera_Add1();
    }
+   	if (gProcImg[OUT_digi_8] || gProcImg[OUT_digi_9]){
+		activeCamAddress = (gProcImg[OUT_digi_9]) + (gProcImg[OUT_digi_8] << 8);
+		LOG_IF_CHANGED("New Active Camera Address: %04X", activeCamAddress);
+   	}
 
 }
 
@@ -1722,9 +1752,9 @@ void CameraMain2 ( void )
 		while(Timer1);
         
         gTxMsg.ID = 0x2a1;
-        gTxMsg.LEN = 2; 
+        gTxMsg.LEN = 3; 
         gTxMsg.BUF[0] = cam_add2;
-        gTxMsg.BUF[1] = cam_add2 >> 8;      
+        gTxMsg.BUF[1] = cam_add2 >> 8; 
         if (!MCOHW_PushMessage(&gTxMsg))
         {
             // failed to transmit

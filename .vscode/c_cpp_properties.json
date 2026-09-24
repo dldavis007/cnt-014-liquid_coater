@@ -1,0 +1,41 @@
+{
+    "version": 4,
+    "configurations": [
+        {
+            "name": "PC_SIDE Host (GCC)",
+            "compilerPath": "C:/TDM-GCC-64/bin/gcc.exe",
+            "compilerArgs": [
+                "-m32",
+                "-funsigned-char"
+            ],
+            "intelliSenseMode": "windows-gcc-x86",
+            "cStandard": "c11",
+            "includePath": [
+                "${workspaceFolder}/Source_Files",
+                "${workspaceFolder}/pc_side",
+                "${workspaceFolder}/tests/stubs"
+            ],
+            "defines": [
+                "PC_SIDE",
+                "SKIP_EEPROM_LOAD",
+                "diag"
+            ],
+            "forcedInclude": [
+                "${workspaceFolder}/pc_side/pc_side.h"
+            ]
+        },
+        {
+            "name": "Target (ICC12)",
+            "compilerPath": "C:/TDM-GCC-64/bin/gcc.exe",
+            "compilerArgs": [
+                "-funsigned-char"
+            ],
+            "intelliSenseMode": "windows-gcc-x86",
+            "cStandard": "c89",
+            "includePath": [
+                "${workspaceFolder}/Source_Files"
+            ],
+            "defines": []
+        }
+    ]
+}

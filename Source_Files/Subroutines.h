@@ -23,7 +23,7 @@
 //ResetProc
 
 
-
+extern struct menu_var HDSDSetting;
 #define STR_VALUE_LEN 12
 
 struct menu_var{

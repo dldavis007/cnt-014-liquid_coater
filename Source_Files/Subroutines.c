@@ -28,6 +28,7 @@ const char enum_type_str[]="LIQUID,   FBE";
 const char enum_neg_pos_str[]="NEG,POS";
 const char enum_alpha_str[]=" ,A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,0,1,2,3,4,5,6,7,8,9,.,<,>,;,:,@,(,),-,-"; //last char is the cursor char, do not count for max
 const char enum_number_str[]="0,1,2,3,4,5,6,7,8,9,-";  //last char is the cursor char, do not count for max
+const char enum_hd_sd[]="SD,HD";  //enum for hd, sd setting
 
 
 char Variable_flag;
@@ -387,6 +388,10 @@ struct menu_var HtrISOTemp = {
 	   32,1,0,300,0,3," 32",enum_NULL_str
 }; //0-100
 
+struct menu_var HDSDSetting= {
+	   1,1,1,2,0,2,"SD",enum_hd_sd
+};
+
 struct menu_var HtrBaseTemp = {
 	   32,1,0,300,0,3," 32",enum_NULL_str
 }; //0-100
@@ -699,6 +704,7 @@ struct MenuStruct Menuc[MenuSize] = {
                                             "       CAMERAS      ",
                                             " CAMERA 1           ",
                                             " CAMERA 2           ",
+                                            " HD/SD SETTING      ",
                                             " EXIT               ",
                                             "                    ",
                                             "                    ",
@@ -707,11 +713,10 @@ struct MenuStruct Menuc[MenuSize] = {
                                             "                    ",
                                             "                    ",
                                             "                    ",
-                                            "                    ",
-                                            15,15,0,0,0,0,0,0,0,0,0,
+                                            15,15,17,0,0,0,0,0,0,0,0,
                                             &NullVar,
                                             &NullVar,
-                                            &NullVar,
+                                            &HDSDSetting,
                                             &NullVar,
                                             &NullVar,
                                             &NullVar,
@@ -722,8 +727,8 @@ struct MenuStruct Menuc[MenuSize] = {
                                             &NullVar,
                                             &NullFunction,
                                             &NullFunction,
+                                            &StdVarFunction,
                                             &ExitMenu,
-                                            &NullFunction,
                                             &NullFunction,
                                             &NullFunction,
                                             &NullFunction,
