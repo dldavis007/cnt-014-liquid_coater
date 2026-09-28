@@ -103,8 +103,27 @@ void FlashWrite(int ArraySize, char WriteData[], int *WriteAddr)
 UNSIGNED8  MCOHW_Init(UNSIGNED16 BaudRate)          { (void)BaudRate; return 1; }
 UNSIGNED8  MCOHW_SetCANFilter(UNSIGNED16 CANID)     { (void)CANID;    return 1; }
 void       MCOHW_TimerISR(void)                      { }
-UNSIGNED16 MCOHW_GetTime(void)                       { return 0; }
-UNSIGNED8  MCOHW_IsTimeExpired(UNSIGNED16 timestamp) { (void)timestamp; return 1; }
+
+/* Controllable MCO time base. OFF by default, so MCOHW_IsTimeExpired() stays
+ * pinned to 1 and every suite that paces off it keeps falling through (see the
+ * header note). set_mco_time() opts a suite in and switches to the real
+ * wraparound compare from mcohw.c, for testing an actual timeout window. */
+static int        mco_time_ctl = 0;
+static UNSIGNED16 mco_time     = 0;
+
+void set_mco_time(UNSIGNED16 ms) { mco_time_ctl = 1; mco_time = ms; }
+void clear_mco_time(void)        { mco_time_ctl = 0; mco_time = 0; }
+
+UNSIGNED16 MCOHW_GetTime(void) { return mco_time; }
+
+UNSIGNED8 MCOHW_IsTimeExpired(UNSIGNED16 timestamp)
+{
+    if (!mco_time_ctl) return 1;
+    timestamp++;                                /* min runtime, matches mcohw.c */
+    if (mco_time > timestamp)
+        return (UNSIGNED8)((mco_time - timestamp) < 0x8000);
+    return (UNSIGNED8)((timestamp - mco_time) > 0x8000);
+}
 
 /* The acceptance-filter table mcohw.c owns; user.c clears it on reset. */
 UNSIGNED8 setFilters[8] = {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};

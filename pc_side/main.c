@@ -328,6 +328,9 @@ int main(int argc, char **argv)
     InitCANOpen();
     LOG_PRINTF(("[host] unit + CANopen up, interrupts enabled\n"));
 
+    HDSDSetting.value = 2.0f;  /* default to HD active camera, for testing at least */
+    LOG_PRINTF(("[host] HDSDSetting.value = %.1f (default HD active camera for testing, default SD in production)\n", HDSDSetting.value));
+
     /* Park the coater idle so the coating sequence is a no-op until commanded
      * (the trigger arrives over CAN, as on the target). */
     State = FinishState;
@@ -336,8 +339,8 @@ int main(int argc, char **argv)
      * host skips — leaving both 0, which makes CameraMain1/2's address-match
      * test trivially true EVERY pass and floods the bus with display frames.
      * Seed distinct nonzero values so a match needs a real reply. */
-    cam_add1 = 0x1111;
-    cam_add2 = 0x2222;
+    cam_add1 = 0x1928;
+    cam_add2 = 0x2526;
 
     /* Assert the camera-present input. doevents() only accepts the start
      * trigger when (VSEL_PORT & CAM_ON) is set; that is a GPIO on the target,

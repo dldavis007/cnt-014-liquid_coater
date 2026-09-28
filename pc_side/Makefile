@@ -97,16 +97,16 @@ MKFILE := $(firstword $(MAKEFILE_LIST))
 UNIT_SRCS    := $(patsubst $(BUILD)/%.o,$(SRC)/%.c,$(UNIT_OBJS))
 MISSING_SRCS := $(filter-out $(wildcard $(SRC)/*.c),$(UNIT_SRCS))
 
-$(BUILD):
+$(BUILD):												# the build/ folder
 	-mkdir $(BUILD)
 
-$(BUILD)/%.o: $(SRC)/%.c $(MKFILE) | $(BUILD)
+$(BUILD)/%.o: $(SRC)/%.c $(MKFILE) | $(BUILD) 			# production .c  → .o
 	$(CC) $(PROD_CFLAGS) $(INCS) $(FINC) -c -o $@ $<
 
-$(BUILD)/%.o: %.c $(MKFILE) | $(BUILD)
+$(BUILD)/%.o: %.c $(MKFILE) | $(BUILD)					# pc_side/*.c  → .o
 	$(CC) $(HOST_CFLAGS) $(INCS) $(FINC) -c -o $@ $<
 
-$(EXE): $(OBJS)
+$(EXE): $(OBJS)											# .o files  → exe
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 .PHONY: all run clean check-sources stop-if-running retry-relink

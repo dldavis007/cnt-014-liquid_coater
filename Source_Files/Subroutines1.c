@@ -152,6 +152,18 @@ extern char lightval;
 
 extern CAN_MSG gTxMsg;
 
+/* HD trig handshake. Command bits arrive in gProcImg[OUT_digi_10], the 5-byte
+ * 0x521 command RPDO (user.c). The query carries NODE_ID so the camera knows
+ * which unit is asking; the answer echoes it back in the same position. */
+#define TRIG_REQUEST_BIT      0x02   /* gProcImg[OUT_digi_0] */
+#define CAM_QUERY_TRIG_MODE   0x10   /* 0x521 BUF[0] */
+#define CAM_CMD_TRIG_RESPONSE 0x20   /* gProcImg[OUT_digi_10] */
+#define CAM_TRIG_NODE         (OUT_digi_10 + 3)   /* NODE_ID byte of the answer */
+#define TRIG_QUERY_TIMEOUT_MS 5000
+
+bool trig_query_sent = false;
+UNSIGNED16 trig_query_timer = 0;
+
 extern char State;
 extern char Cycle_Complete;
 
@@ -572,6 +584,111 @@ Start by going to retracted position and start pumps, then extend to extended po
 	return 0;
 }
 
+
+
+/* Reads HDSDSetting as a whole number. The menu edits .value as a float with
+ * inc 1, so it should already be integral - the rounding keeps a future
+ * fractional increment from silently failing every == compare. */
+char HDSDMode ( void )
+{
+	return (char)( HDSDSetting.value + 0.5 );
+}
+
+/* Sends the 0x521 trig-mode query to the active camera and arms the response
+ * window. TRIG_SENT, or TRIG_NOCAM if no camera has been addressed. */
+TrigResult HDTrigQueryStart ( void )
+{
+	if ( !activeCamAddress )				/* no camera addressed yet */
+		return TRIG_NOCAM;
+
+	gTxMsg.ID = 0x521;
+	gTxMsg.LEN = 4;
+	gTxMsg.BUF[0] = CAM_QUERY_TRIG_MODE;
+	gTxMsg.BUF[1] = activeCamAddress;
+	gTxMsg.BUF[2] = activeCamAddress >> 8;
+	gTxMsg.BUF[3] = NODE_ID;
+	if ( !MCOHW_PushMessage ( &gTxMsg ) )
+	{
+		// failed to transmit
+		MCOUSER_FatalError ( 0x8801 );
+	}
+
+	gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;	/* drop a stale answer */
+	trig_query_sent = true;
+	trig_query_timer = MCOHW_GetTime() + TRIG_QUERY_TIMEOUT_MS;
+	LOG_PRINTF(("Trig query sent to HD active camera, waiting for response..."));
+	return TRIG_SENT;
+}
+
+/* Resolves an armed trig query. TRIG_STARTED when the camera answers for this
+ * node, TRIG_NOTIDLE if it answers while we are busy, TRIG_TIMEDOUT when the
+ * window closes, TRIG_WAITING while it is still open, TRIG_IDLE if not armed. */
+TrigResult HDTrigQueryService ( void )
+{
+	if ( !trig_query_sent )
+		return TRIG_IDLE;
+
+	if ( ( gProcImg[OUT_digi_10] & CAM_CMD_TRIG_RESPONSE ) &&
+	     gProcImg[CAM_TRIG_NODE] == NODE_ID )
+	{
+		gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;
+		trig_query_sent = false;
+		if ( State != FinishState || ghostState )
+			return TRIG_NOTIDLE;
+		State = TrigState;
+		LOG_PRINTF(("Trig query response received from HD active camera, starting coating sequence..."));
+		return TRIG_STARTED;
+	}
+
+	if ( MCOHW_IsTimeExpired ( trig_query_timer ) )
+	{
+		trig_query_sent = false;
+		LOG_PRINTF(("HD Trig query timed out"));
+		return TRIG_TIMEDOUT;
+	}
+
+	return TRIG_WAITING;
+}
+
+/* Trig request: SD starts the coating sequence directly, HD first asks the
+ * active camera whether this unit owns the trigger. Returns what this pass
+ * did - the handshake outcome when one resolved, else the request's. */
+TrigResult TrigRequest ( void )
+{
+	char hdsd = HDSDMode();
+	TrigResult result;
+
+	/* Resolve an answer already in flight FIRST: arming clears the response
+	 * bit, so a new request arriving on the same pass would otherwise discard
+	 * the answer we were waiting for. */
+	result = HDTrigQueryService();
+
+	if ( gProcImg[OUT_digi_0] & TRIG_REQUEST_BIT )
+	{
+		gProcImg[OUT_digi_0] &= ~TRIG_REQUEST_BIT;
+
+		/* A request landing on the pass that started the sequence is consumed
+		 * but cannot re-arm - we are no longer idle. */
+		if ( result != TRIG_STARTED )
+		{
+			if ( State != FinishState || ghostState ) 	// we don't trigger if State != FinishState (in middle of coating sequence) or ghostState (middle of purge sequence)
+				result = TRIG_NOTIDLE;
+			else if ( hdsd == HDSD_HD )					// we are HD, so we need to ask the camera if we own the trigger
+				result = HDTrigQueryStart();
+			else if ( hdsd != HDSD_SD )     // this shouldn't ever happen (hdsd enum is range 1-2) but this is an edge case
+				result = TRIG_IDLE;			/* mode has no trig path */
+			else if ( VSEL_PORT & CAM_ON && (hdsd == HDSD_SD) ) // if we are SD and the camera is on, we can start the sequence
+			{
+				State = TrigState;
+				result = TRIG_STARTED;
+			}
+			else if (hdsd == HDSD_SD)							// we are SD but the camera is off
+				result = TRIG_NOCAM;
+		}
+	}
+
+	return result;
+}
 
 
 extern char *RamAddress;
@@ -1165,42 +1282,12 @@ void doevents ( void )
               BlowerOn ();
             }
 
+			update_active_cam_address();
 			CameraMain1 ();
 			CameraMain2 ();
 			
-            if ( gProcImg[OUT_digi_0] & 0x02 )
-			{
-				if (VSEL_PORT & CAM_ON && HDSDSetting.value == 1){
-					
-					if ( State == FinishState && !ghostState ){
-						State = TrigState;
-					}
-				}		
-				else if (HDSDSetting.value == 2){ // if hdsd setting is 2 it means hd setting is on
-					if ( State == FinishState && !ghostState ){
-						// send 521 message to active camera to query if it's trig mode is this unit
-						gTxMsg.ID = 0x521;
-						gTxMsg.LEN = 4; 
-						gTxMsg.BUF[0] = 0x08; // query trig mode
-						gTxMsg.BUF[1] = activeCamAddress; // address of active camera
-						gTxMsg.BUF[2] = activeCamAddress >> 8;      
-						gTxMsg.BUF[3] = NODE_ID;   // id of triggerable unit asking for trigger
-						if (!MCOHW_PushMessage(&gTxMsg))
-						{
-							// failed to transmit
-							MCOUSER_FatalError(0x8801);
-						}
-						
-						// State = TrigState;
-					}
-							
-				}
+			TrigRequest ();
 
-				gProcImg[OUT_digi_0] &=  ~0x02;	
-			}
-			
-                					
-			
 			if ( 1 ) // LA home etc.
 			{
 			    Cycle_Complete = 1;
@@ -1521,6 +1608,31 @@ void doevents ( void )
 
 }
 
+// must go before cameramain1 and cameramain2 because those functions zero out OUT_digi_8 and OUT_digi_9
+int update_active_cam_address(void){
+
+	UNSIGNED16 addr;
+	// zero guard
+	if ( !(gProcImg[OUT_digi_8]) && !(gProcImg[OUT_digi_9])){
+		return 0;
+	}
+
+	addr = ( gProcImg[OUT_digi_9] << 8 ) + gProcImg[OUT_digi_8];
+
+	/* another unit's camera */
+    if ( addr != cam_add1 && addr != cam_add2 ){
+        return 0;                       
+	}
+	// if already updated
+    if ( addr == activeCamAddress ){
+        return 0;
+	}
+	
+	activeCamAddress = addr;
+    LOG_PRINTF(( "New Active Camera Address: %04X\n", activeCamAddress ));
+    return 1;
+}
+
 
 void CameraMain1 ( void )
 {
@@ -1642,10 +1754,12 @@ void CameraMain1 ( void )
         cam_addx1[1] = cam_add1>>8;
         Save_Camera_Add1();
    }
-   	if (gProcImg[OUT_digi_8] || gProcImg[OUT_digi_9]){
-		activeCamAddress = (gProcImg[OUT_digi_9]) + (gProcImg[OUT_digi_8] << 8);
-		LOG_IF_CHANGED("New Active Camera Address: %04X", activeCamAddress);
-   	}
+   // TODO does COATING CAM's address not get put in OUT_digi_8? 
+   	// if (gProcImg[OUT_digi_8] || gProcImg[OUT_digi_9]){
+	// 	activeCamAddress = (gProcImg[OUT_digi_9] << 8) + (gProcImg[OUT_digi_8]);
+	// 	// activeCamAddress = (gProcImg[OUT_digi_9]) + (gProcImg[OUT_digi_8] << 8);
+	// 	LOG_IF_CHANGED("New Active Camera Address: %04X", activeCamAddress);
+   	// }
 
 }
 

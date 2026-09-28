@@ -20,6 +20,12 @@ void can_rx_reset(void);
  * the Timer1 pacing service described below. Idempotent — call it from setUp(). */
 void host_firmware_init(void);
 
+/* MCO millisecond time base. Off by default: MCOHW_IsTimeExpired() returns 1
+ * unconditionally so pacing code falls through. set_mco_time() opts in and
+ * makes GetTime/IsTimeExpired behave like the target's, for timeout tests. */
+void set_mco_time(UNSIGNED16 ms);
+void clear_mco_time(void);
+
 /* RTI simulation. Deterministic mode: advance_ticks(N) fires exactly N ISRs. */
 void rti_thread_start(void);
 void rti_thread_start_realtime(unsigned int period_ms);
