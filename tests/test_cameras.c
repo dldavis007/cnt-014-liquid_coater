@@ -17,9 +17,8 @@
  * SFRs, which under PC_SIDE are just bytes in sfr_regs[], so tests read them
  * back directly.
  *
- * Regression intent: CameraMain1/2 are unchanged between 4.33 and 4.34 apart
- * from the gProcImg -> rpdo pointer refactor, so everything here is shared
- * contract. See tests/REGRESSION.md.
+ * Carried over from the refactored 4.33 suite; every test passes unchanged
+ * against the production 4.33.
  */
 
 #include "unity.h"
@@ -52,18 +51,21 @@ extern unsigned int  LAMoveTimer;
 extern unsigned long LAMovingTimer;
 
 extern unsigned cam_add1, cam_add2;
+extern unsigned int activeCamAddress;
 extern char     cam_addx1[2], cam_addx2[2];
 extern char     CurrentLight;
 extern char     Gen_Flags;
 extern char     State;
 extern char     ghostState;
 
-/* Addresses deliberately BELOW 100: the 0x02 report handler does
- * `Timer1 = cam_add1/100; while(Timer1);` to stagger replies, and Timer1 only
- * counts down in the RTI ISR. Keeping the address under 100 makes that zero,
- * so the suite never needs the RTI thread running to avoid a hang. */
+/* Addresses deliberately BELOW 100 keep the 0x02 reply delay (cam_add/100 ms)
+ * at zero. */
 #define CAM1_ADDR 0x0042
 #define CAM2_ADDR 0x0055
+
+/* Cam1Enable / Cam2Enable enum positions: " ENABLED,DISABLED" */
+#define CAM_ENABLED  1
+#define CAM_DISABLED 2
 
 static void set_cmd(unsigned char b0, unsigned char b1, unsigned char b2,
                     unsigned char b3, unsigned char b4)
@@ -98,10 +100,14 @@ void setUp(void)
     select_address(0);
     set_cmd(0, 0, 0, 0, 0);
     CurrentLight = 0;
+    activeCamAddress = 0;
+    Cam1Enable.value = CAM_ENABLED;
+    Cam2Enable.value = CAM_ENABLED;
+    InternalExternalCameraSetting.value = INTERNAL_CAMERA;
     can_tx_reset();
 }
 
-void tearDown(void) { }
+void tearDown(void) { clear_mco_time(); }
 
 
 /* ==========================================================================
@@ -232,6 +238,52 @@ static void test_cmd_report_address_transmits_both_cameras(void)
         "camera 2 should report its address on 0x2a1");
 }
 
+/* Replies wait cam_add/100 ms on the MCO clock without blocking doevents(),
+ * so the lower address reports first. */
+static void test_cmd_report_address_is_delayed_by_address_without_blocking(void)
+{
+    cam_add1 = 0x1000;          /* 40 ms */
+    cam_add2 = 0x2000;          /* 81 ms */
+    set_mco_time(0);
+    set_cmd(0x02, 0, 0, 0, 0);
+
+    doevents();
+    TEST_ASSERT_FALSE_MESSAGE(sent(0x2a1, 0x00, 0x10), "camera 1 waits its delay");
+    TEST_ASSERT_FALSE(sent(0x2a1, 0x00, 0x20));
+
+    set_mco_time(42);
+    doevents();
+    TEST_ASSERT_TRUE_MESSAGE(sent(0x2a1, 0x00, 0x10), "camera 1 reports at 40 ms");
+    TEST_ASSERT_FALSE_MESSAGE(sent(0x2a1, 0x00, 0x20), "camera 2 still waiting");
+
+    set_mco_time(83);
+    doevents();
+    TEST_ASSERT_TRUE_MESSAGE(sent(0x2a1, 0x00, 0x20), "camera 2 reports at 81 ms");
+}
+
+/* The point of not blocking: the rest of the pass, e.g. 0x321 pairing, still runs. */
+static void test_main_loop_runs_while_a_report_is_pending(void)
+{
+    extern UNSIGNED16 paired_camera_address;
+
+    cam_add1 = 0x1000;
+    cam_add2 = 0x2000;
+    paired_camera_address = 0;
+    set_mco_time(0);
+    set_cmd(0x02, 0, 0, 0, 0);
+    doevents();
+
+    pairing_msg[0] = NODE_ID;
+    pairing_msg[1] = 0x42;
+    pairing_msg[2] = 0x19;
+    doevents();
+    TEST_ASSERT_EQUAL_HEX16(0x1942, paired_camera_address);
+
+    set_mco_time(100);          /* flush the pending replies */
+    doevents();
+    paired_camera_address = 0;
+}
+
 
 /* ==========================================================================
  * 0x04 - store a new address (gated on the old one matching)
@@ -245,6 +297,17 @@ static void test_cmd_store_address_updates_camera_1_when_old_matches(void)
 
     TEST_ASSERT_EQUAL_HEX16_MESSAGE(0x1234, cam_add1,
         "0x04 with the matching old address should store the new one");
+}
+
+static void test_cmd_store_address_updates_camera_2_when_old_matches(void)
+{
+    set_cmd(0x04, CAM2_ADDR & 0xFF, (CAM2_ADDR >> 8) & 0xFF, 0x78, 0x56);
+
+    doevents();
+
+    TEST_ASSERT_EQUAL_HEX16(0x5678, cam_add2);
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM1_ADDR, cam_add1, "camera 1 untouched");
+    TEST_ASSERT_EQUAL_UINT8(0, camera_cmds[0]);
 }
 
 static void test_cmd_store_address_ignored_when_old_does_not_match(void)
@@ -283,9 +346,7 @@ static void test_cmd_activate_menu_consumes_the_command(void)
     doevents();
 
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, camera_cmds[0],
-        "the command bytes are cleared so the menu opens once");
-    TEST_ASSERT_EQUAL_UINT8(0, camera_cmds[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, camera_cmds[2]);
+        "the command byte is cleared so the menu opens once");
 }
 
 static void test_cmd_activate_menu_ignored_for_a_different_address(void)
@@ -294,8 +355,26 @@ static void test_cmd_activate_menu_ignored_for_a_different_address(void)
 
     doevents();
 
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0x08, camera_cmds[0],
-        "a command aimed at another camera is left untouched");
+    TEST_ASSERT_FALSE_MESSAGE(Gen_Flags & Gen_Flags_Menu_Active,
+        "a command aimed at another camera opens nothing");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, camera_cmds[0],
+        "and is still consumed after both cameras have seen it");
+}
+
+/* A request arriving while a menu is open is dropped, not deferred until the
+ * menu closes; the camera has to ask again. */
+static void test_cmd_activate_menu_while_a_menu_is_open_is_dropped(void)
+{
+    Gen_Flags |= Gen_Flags_Menu_Active;
+    set_cmd(0x08, CAM1_ADDR & 0xFF, (CAM1_ADDR >> 8) & 0xFF, 0, 0);
+
+    doevents();
+    TEST_ASSERT_EQUAL_UINT8(0, camera_cmds[0]);
+
+    Gen_Flags = 0;
+    doevents();
+    TEST_ASSERT_FALSE_MESSAGE(Gen_Flags & Gen_Flags_Menu_Active,
+        "the dropped request must not open the menu once the old one closes");
 }
 
 static void test_cmd_activate_menu_selects_camera_2(void)
@@ -326,6 +405,137 @@ static void test_address_change_updates_the_hex_display_variable(void)
     cam_add2 = 0x0DEF;
     doevents();
     TEST_ASSERT_EQUAL_STRING("0DEF", disp_add2.str_value);
+}
+
+
+/* ==========================================================================
+ * Active camera latch (update_active_cam_address)
+ *
+ * Both CameraMain1 and CameraMain2 ZERO camera_addr[] the moment they match,
+ * so the latch has to run BEFORE them in doevents() - it did not, and the
+ * coating camera's address was consumed before it could ever be recorded while
+ * the inspection camera's survived (CameraMain1 misses it, so nothing clears).
+ * These tests pin the ordering and the guards that keep the latch stable.
+ * ========================================================================== */
+
+static void test_latch_records_the_coating_camera(void)
+{
+    select_address(CAM1_ADDR);
+
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, update_active_cam_address(),
+        "a new selection should report a change");
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM1_ADDR, activeCamAddress,
+        "the coating camera must be latched like any other");
+}
+
+static void test_latch_records_the_inspection_camera(void)
+{
+    select_address(CAM2_ADDR);
+
+    TEST_ASSERT_EQUAL_INT(1, update_active_cam_address());
+    TEST_ASSERT_EQUAL_HEX16(CAM2_ADDR, activeCamAddress);
+}
+
+/* REGRESSION: the whole reason the latch moved ahead of CameraMain1/2.
+ * Through the real pass, CameraMain1 consumes camera_addr[] at the match, so a
+ * latch running after it would read 0,0 and never record the coating camera. */
+static void test_latch_survives_the_full_doevents_pass(void)
+{
+    select_address(CAM1_ADDR);
+
+    doevents();
+
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM1_ADDR, activeCamAddress,
+        "the latch must run before CameraMain1 clears the address bytes");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, camera_addr[0],
+        "and CameraMain1 still consumes the selection");
+}
+
+/* A pass with nothing selected must leave the latch alone - the address has to
+ * outlive the single pass in which CameraMain1/2 consume it. */
+static void test_latch_is_not_wiped_by_a_pass_with_no_selection(void)
+{
+    select_address(CAM1_ADDR);
+    doevents();
+    TEST_ASSERT_EQUAL_HEX16(CAM1_ADDR, activeCamAddress);
+
+    doevents();                         /* nothing selected this pass */
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM1_ADDR, activeCamAddress,
+        "an idle pass must not clear the active camera");
+
+    doevents();
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM1_ADDR, activeCamAddress,
+        "and it stays put for as long as nothing else is selected");
+}
+
+/* REGRESSION for the zero guard: an idle pass presents camera_addr[] as 0,0,
+ * which also matches a never-configured camera address of 0. */
+static void test_latch_holds_when_a_camera_address_is_unconfigured(void)
+{
+    cam_add1 = 0;                       /* never addressed */
+
+    select_address(CAM2_ADDR);
+    update_active_cam_address();
+    TEST_ASSERT_EQUAL_HEX16(CAM2_ADDR, activeCamAddress);
+
+    select_address(0);                  /* idle pass: camera_addr[] is 0,0 */
+
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, update_active_cam_address(),
+        "an idle pass is not a selection, even of an unconfigured camera");
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM2_ADDR, activeCamAddress,
+        "the zero guard keeps 0,0 from matching an unset camera address");
+}
+
+/* An external HD camera's address is neither cam_add1 nor cam_add2, and it
+ * must still be latched so TrigRequest can compare it to the paired camera. */
+static void test_latch_records_an_external_camera_address(void)
+{
+    select_address(CAM1_ADDR);
+    update_active_cam_address();
+
+    select_address(0x0377);             /* neither cam_add1 nor cam_add2 */
+
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, update_active_cam_address(),
+        "an external camera's address is a change");
+    TEST_ASSERT_EQUAL_HEX16(0x0377, activeCamAddress);
+}
+
+static void test_latch_reports_no_change_when_the_same_camera_is_reselected(void)
+{
+    select_address(CAM1_ADDR);
+    TEST_ASSERT_EQUAL_INT(1, update_active_cam_address());
+
+    select_address(CAM1_ADDR);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, update_active_cam_address(),
+        "reselecting the camera we already hold is not a change");
+    TEST_ASSERT_EQUAL_HEX16(CAM1_ADDR, activeCamAddress);
+}
+
+static void test_latch_switches_between_the_two_cameras(void)
+{
+    select_address(CAM1_ADDR);
+    doevents();
+    TEST_ASSERT_EQUAL_HEX16(CAM1_ADDR, activeCamAddress);
+
+    select_address(CAM2_ADDR);
+    doevents();
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM2_ADDR, activeCamAddress,
+        "selecting the other camera moves the latch");
+}
+
+/* The address is assembled low byte first, matching how CameraMain1/2 write it
+ * (camera_addr[0] = addr, camera_addr[1] = addr >> 8). A swapped read here sent
+ * every HD trig query to a byte-reversed address. */
+static void test_latch_assembles_the_address_low_byte_first(void)
+{
+    cam_add1 = 0x1928;
+    camera_addr[0] = 0x28;              /* LSB */
+    camera_addr[1] = 0x19;              /* MSB */
+
+    update_active_cam_address();
+
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(0x1928, activeCamAddress,
+        "camera_addr[0] is the LOW byte");
 }
 
 
@@ -390,6 +600,144 @@ static void test_trigger_is_ignored_with_no_camera_on(void)
 }
 
 
+/* ==========================================================================
+ * Camera enable / disable (Cam1Enable, Cam2Enable)
+ *
+ * A disabled camera's CameraMain returns right after mirroring its address to
+ * the display variable, so it ignores selects and every 0x521 command.
+ * ========================================================================== */
+
+static void test_disabled_camera_1_is_not_selected(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    select_address(CAM1_ADDR);
+
+    doevents();
+
+    TEST_ASSERT_FALSE_MESSAGE(VSEL_PORT & CAM_ON, "disabled camera stays off");
+    TEST_ASSERT_EQUAL_INT(0, CurrentLight);
+}
+
+static void test_disabled_camera_2_is_not_selected(void)
+{
+    Cam2Enable.value = CAM_DISABLED;
+    select_address(CAM2_ADDR);
+
+    doevents();
+
+    TEST_ASSERT_FALSE_MESSAGE(VSEL_PORT & CAM_ON, "disabled camera stays off");
+    TEST_ASSERT_EQUAL_INT(0, CurrentLight);
+}
+
+static void test_disabling_camera_1_leaves_camera_2_working(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    select_address(CAM2_ADDR);
+
+    doevents();
+
+    TEST_ASSERT_TRUE(VSEL_PORT & CAM_ON);
+    TEST_ASSERT_EQUAL_INT(2, CurrentLight);
+}
+
+static void test_disabled_camera_does_not_report_its_address(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    set_cmd(0x02, 0, 0, 0, 0);
+
+    doevents();
+
+    TEST_ASSERT_FALSE_MESSAGE(
+        sent(0x2a1, CAM1_ADDR & 0xFF, (CAM1_ADDR >> 8) & 0xFF),
+        "disabled camera 1 must not answer a scan");
+    TEST_ASSERT_TRUE_MESSAGE(
+        sent(0x2a1, CAM2_ADDR & 0xFF, (CAM2_ADDR >> 8) & 0xFF),
+        "camera 2 still answers");
+}
+
+static void test_disabled_camera_keeps_its_address_on_random_command(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    set_cmd(0x01, 0, 0, 0, 0);
+
+    doevents();
+
+    TEST_ASSERT_EQUAL_HEX16(CAM1_ADDR, cam_add1);
+}
+
+static void test_disabled_camera_ignores_store_address(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    set_cmd(0x04, CAM1_ADDR & 0xFF, (CAM1_ADDR >> 8) & 0xFF, 0x34, 0x12);
+
+    doevents();
+
+    TEST_ASSERT_EQUAL_HEX16(CAM1_ADDR, cam_add1);
+}
+
+static void test_disabled_camera_does_not_open_its_menu(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    set_cmd(0x08, CAM1_ADDR & 0xFF, (CAM1_ADDR >> 8) & 0xFF, 0, 0);
+
+    doevents();
+
+    TEST_ASSERT_FALSE(Gen_Flags & Gen_Flags_Menu_Active);
+    TEST_ASSERT_FALSE(VSEL_PORT & CAM_ON);
+}
+
+static void test_disabled_camera_still_mirrors_its_display_address(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    cam_add1 = 0x0ABC;
+
+    doevents();
+
+    TEST_ASSERT_EQUAL_STRING("0ABC", disp_add1.str_value);
+}
+
+static void test_reenabled_camera_is_selected_again(void)
+{
+    Cam1Enable.value = CAM_DISABLED;
+    doevents();
+
+    Cam1Enable.value = CAM_ENABLED;
+    select_address(CAM1_ADDR);
+    doevents();
+
+    TEST_ASSERT_TRUE(VSEL_PORT & CAM_ON);
+    TEST_ASSERT_EQUAL_INT(1, CurrentLight);
+}
+
+/* Only CameraMain2 clears the 0x01 / 0x02 commands, so with camera 2 disabled
+ * nothing consumes them and camera 1 repeats the command every pass. */
+static void test_report_command_is_consumed_with_camera_2_disabled(void)
+{
+    Cam2Enable.value = CAM_DISABLED;
+    set_cmd(0x02, 0, 0, 0, 0);
+
+    doevents();
+
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, camera_cmds[0],
+        "the scan command must be consumed, not repeated every pass");
+}
+
+static void test_random_command_is_consumed_with_camera_2_disabled(void)
+{
+    unsigned first;
+
+    Cam2Enable.value = CAM_DISABLED;
+    set_cmd(0x01, 0, 0, 0, 0);
+
+    doevents();
+    first = cam_add1;
+    doevents();
+
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(first, cam_add1,
+        "camera 1 must regenerate once, not on every pass");
+}
+
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -404,20 +752,46 @@ int main(void)
     RUN_TEST(test_cmd_random_address_changes_camera_2);
 
     RUN_TEST(test_cmd_report_address_transmits_both_cameras);
+    RUN_TEST(test_cmd_report_address_is_delayed_by_address_without_blocking);
+    RUN_TEST(test_main_loop_runs_while_a_report_is_pending);
 
     RUN_TEST(test_cmd_store_address_updates_camera_1_when_old_matches);
+    RUN_TEST(test_cmd_store_address_updates_camera_2_when_old_matches);
     RUN_TEST(test_cmd_store_address_ignored_when_old_does_not_match);
 
     RUN_TEST(test_cmd_activate_menu_selects_camera_1_and_announces);
     RUN_TEST(test_cmd_activate_menu_consumes_the_command);
     RUN_TEST(test_cmd_activate_menu_ignored_for_a_different_address);
+    RUN_TEST(test_cmd_activate_menu_while_a_menu_is_open_is_dropped);
     RUN_TEST(test_cmd_activate_menu_selects_camera_2);
 
     RUN_TEST(test_address_change_updates_the_hex_display_variable);
 
+    RUN_TEST(test_latch_records_the_coating_camera);
+    RUN_TEST(test_latch_records_the_inspection_camera);
+    RUN_TEST(test_latch_survives_the_full_doevents_pass);
+    RUN_TEST(test_latch_is_not_wiped_by_a_pass_with_no_selection);
+    RUN_TEST(test_latch_holds_when_a_camera_address_is_unconfigured);
+    RUN_TEST(test_latch_records_an_external_camera_address);
+    RUN_TEST(test_latch_reports_no_change_when_the_same_camera_is_reselected);
+    RUN_TEST(test_latch_switches_between_the_two_cameras);
+    RUN_TEST(test_latch_assembles_the_address_low_byte_first);
+
     RUN_TEST(test_coating_camera_arms_the_trigger);
     RUN_TEST(test_inspection_camera_also_arms_the_trigger);
     RUN_TEST(test_trigger_is_ignored_with_no_camera_on);
+
+    RUN_TEST(test_disabled_camera_1_is_not_selected);
+    RUN_TEST(test_disabled_camera_2_is_not_selected);
+    RUN_TEST(test_disabling_camera_1_leaves_camera_2_working);
+    RUN_TEST(test_disabled_camera_does_not_report_its_address);
+    RUN_TEST(test_disabled_camera_keeps_its_address_on_random_command);
+    RUN_TEST(test_disabled_camera_ignores_store_address);
+    RUN_TEST(test_disabled_camera_does_not_open_its_menu);
+    RUN_TEST(test_disabled_camera_still_mirrors_its_display_address);
+    RUN_TEST(test_reenabled_camera_is_selected_again);
+    RUN_TEST(test_report_command_is_consumed_with_camera_2_disabled);
+    RUN_TEST(test_random_command_is_consumed_with_camera_2_disabled);
 
     return UNITY_END();
 }

@@ -7,17 +7,16 @@
 #
 # Rev4.33 vs Rev4.34
 # ------------------
-# Rev4.33 is the pre-refactor layout: everything lives in SourceFiles/ and there
+# Rev4.33 is the pre-refactor layout: everything lives in Source_Files/ and there
 # is NO dependency on the shared ../../../../Library tree — this unit carries its
-# own mco.c, user.c, Interrupts.c, Packets.c and MenuSerialize.c. So unlike
-# Rev4.34's Makefile there is no LIBDRV/LIBINC and no -idirafter: one include
-# path covers it, and the ImageCraft C library headers that forced -idirafter
-# over there are not on it.
+# own mco.c, user.c and Interrupts.c. So unlike Rev4.34's Makefile there is no
+# LIBDRV/LIBINC and no -idirafter: one include path covers it, and the
+# ImageCraft C library headers that forced -idirafter over there are not on it.
 #
 # Deliberately NOT compiled:
 #   Controller.c  holds main() and the hardware bring-up; pc_side/main.c is the
 #                 host's entry point instead (and mirrors its init order).
-#   EEProm.c      absolute-address EEPROM access + spins on command-complete
+#   EEProm.c      spins on command-complete (pc_side_host.c emulates it on a file)
 #   Flash.c       same, for the flash writer
 #   mcohw.c       spins on CAN transmit-buffer status bits that never set
 #   Command.c     serial command console, reached only from the SCI ISRs
@@ -43,16 +42,16 @@ SHELL := cmd.exe
 # the default goal and a bare `mingw32-make` would only create a folder.
 .DEFAULT_GOAL := all
 
-SRC := ../SourceFiles
+SRC := ../Source_Files
 
 # PC_SIDE selects the host paths in the real headers (SFR array, no ISR pragmas,
-# no absolute-address vector table). SKIP_EEPROM_LOAD keeps the startup path off
-# the absolute-address EEPROM reads, which cannot be mapped on a PC.
+# no absolute-address vector table). PC_EEPROM points EE_begin at a host EEPROM
+# image, persisted to eeprom.bin (pc_side_host.c).
 # -Ddiag pins HeadSpeed to 8000 in RTI_Int_Handler (Interrupts.c). The head
 # tachometer is a timer input-capture on the target, so on the host HeadSpeed
 # stays 0 and CkHeadRotation always times out into HeadErrorState — the coating
 # sequence could never get past step 2.
-PC_DEF := -DPC_SIDE -DSKIP_EEPROM_LOAD -Ddiag
+PC_DEF := -DPC_SIDE -DPC_EEPROM -Ddiag
 
 # Force-include pc_side.h so INTR_ON/OFF are mapped before hc12def.h/Controller.h
 # /mcohw.h can define them to cli/sei.
@@ -82,43 +81,74 @@ LIBS    := -lws2_32 -lm          # winsock (UDP CAN) + math
 BUILD := build
 
 UNIT_OBJS := $(BUILD)/Subroutines.o $(BUILD)/Subroutines1.o $(BUILD)/mco.o \
-             $(BUILD)/user.o $(BUILD)/Interrupts.o $(BUILD)/MenuSerialize.o \
-             $(BUILD)/Packets.o
+             $(BUILD)/user.o $(BUILD)/Interrupts.o
 HOST_OBJS := $(BUILD)/pc_side_host.o $(BUILD)/main.o
 OBJS      := $(UNIT_OBJS) $(HOST_OBJS)
 EXE       := pc_side_host.exe
 
-# Objects also depend on this Makefile: the -D flags (PC_SIDE, SKIP_EEPROM_LOAD,
+# Objects also depend on this Makefile: the -D flags (PC_SIDE, PC_EEPROM,
 # diag) live here, so editing them must force a rebuild. Without this, changing a
 # define silently leaves every object compiled against the old flags.
 MKFILE := $(firstword $(MAKEFILE_LIST))
 
-$(BUILD):
+# Unit sources that must exist under $(SRC). A missing one otherwise surfaces as
+# make demanding a path nothing generates, which reads like a broken rule rather
+# than a wrong SRC.
+UNIT_SRCS    := $(patsubst $(BUILD)/%.o,$(SRC)/%.c,$(UNIT_OBJS))
+MISSING_SRCS := $(filter-out $(wildcard $(SRC)/*.c),$(UNIT_SRCS))
+
+$(BUILD):												# the build/ folder
 	-mkdir $(BUILD)
 
-$(BUILD)/%.o: $(SRC)/%.c $(MKFILE) | $(BUILD)
+$(BUILD)/%.o: $(SRC)/%.c $(MKFILE) | $(BUILD) 			# production .c  → .o
 	$(CC) $(PROD_CFLAGS) $(INCS) $(FINC) -c -o $@ $<
 
-$(BUILD)/%.o: %.c $(MKFILE) | $(BUILD)
+$(BUILD)/%.o: %.c $(MKFILE) | $(BUILD)					# pc_side/*.c  → .o
 	$(CC) $(HOST_CFLAGS) $(INCS) $(FINC) -c -o $@ $<
 
-$(EXE): $(OBJS)
+$(EXE): $(OBJS)											# .o files  → exe
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
-.PHONY: all run clean
-all: $(EXE)
+.PHONY: all run clean check-sources stop-if-running retry-relink
+all: check-sources $(EXE)
+
+# Fail with the actual reason before make can report it as a missing rule.
+check-sources:
+ifneq ($(MISSING_SRCS),)
+	@echo.
+	@echo *** Cannot find these sources under SRC = $(SRC)
+	@echo ***   $(MISSING_SRCS)
+	@echo ***
+	@echo *** Check the SRC line in this Makefile against the real folder name.
+	@echo *** If you renamed or moved that folder, also run: mingw32-make clean
+	@echo *** - build\*.d caches the old paths and make will keep demanding them.
+	@echo.
+	@exit 1
+endif
 
 # Build FIRST, and only stop a running host if the relink actually needs the
-# file (a live .exe locks it). An unconditional taskkill is where a mysterious
-# "Error 1" comes from: taskkill /F exits 1, so whichever terminal was already
-# running a host suddenly reports a failed target minutes later, with nothing
-# actually wrong — the host was killed, not crashed.
-run:
-	@$(MAKE) --no-print-directory $(EXE) || ( \
-	  echo *** relink blocked: a pc_side_host.exe is already running. && \
-	  echo *** Stopping it - that terminal will report "Error 1". && \
-	  taskkill /F /IM $(EXE) && $(MAKE) --no-print-directory $(EXE) )
+# file (a live .exe locks it). The stop path is reached only after a failed
+# build, and stop-if-running decides whether a lock was really the cause.
+run: check-sources
+	@$(MAKE) --no-print-directory $(EXE) || $(MAKE) --no-print-directory retry-relink
 	.\$(EXE)
+
+# Reached only when the build failed. If no host is running the .exe was never
+# locked, so the failure was a real compiler/linker error: say so and stop,
+# leaving that error as the last thing on screen.
+stop-if-running:
+	@tasklist /FI "IMAGENAME eq $(EXE)" 2>nul | findstr /I /C:"$(EXE)" >nul || ( \
+	  echo. && \
+	  echo *** BUILD FAILED - and no $(EXE) was running, so this was NOT a file lock. && \
+	  echo *** The compiler or linker error above is the real one. && \
+	  echo. && \
+	  exit 1 )
+	@echo *** relink blocked: a $(EXE) is already running and holds the file open.
+	@echo *** Stopping it now - that terminal will exit - then relinking here.
+	@taskkill /F /IM $(EXE) >nul
+
+retry-relink: stop-if-running
+	@$(MAKE) --no-print-directory $(EXE)
 
 clean:
 	-rmdir /s /q $(BUILD) 2>nul

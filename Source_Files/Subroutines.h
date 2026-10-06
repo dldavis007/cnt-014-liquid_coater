@@ -1,7 +1,7 @@
 #ifndef Subroutines_H
 #define Subroutines_H
 
-#define Revision "4.33"
+#define Revision "4.34"
 
 
 //#pragma paged_function InitPorts InitInterrupts InitPLL InitSCI InitSPI
@@ -23,9 +23,10 @@
 //ResetProc
 
 
-
+extern struct menu_var InternalExternalCameraSetting;
+extern struct menu_var Cam1Enable;
+extern struct menu_var Cam2Enable;
 #define STR_VALUE_LEN 12
-
 
 struct menu_var{
 float value;            //actual value of the variable, or pointer to enum list if an enum type variable
@@ -37,10 +38,7 @@ signed char len_str;			//length of str_value, pads left with spaces
 char str_value[STR_VALUE_LEN];     //string equivalent of value, or current enum pointed to by value
 const char *str_enum;         //pointer to comma separated enum list, must be NULL for non-enum variable types
 struct menu_var *next_var; //pointer to then next variable if more than one per line
-char processed_flag;       // flag to indicate if the variable has been processed
-char archetype_index; // index of the variable in the archetype dictionary, used for serialization
 };
-
 
 
 void InitPorts ( void );
@@ -99,9 +97,6 @@ void Load_Camera_Add ( void );
 void UpdateArrayVariables ( struct menu_var *var, char num );
 int ArrayVarFunction ( void );
 int ResetProc(void);
-int update_menu_var_by_str(struct menu_var *var, const char *new_str);
-int update_menu_var_by_value(struct menu_var *var, float new_value);
-int SkipVarFunction ( void );
 
 //PLL OFF
 //#define Tbus .543
@@ -246,7 +241,7 @@ struct menu_var *VarPntr[11];
 int (*FunctPtr[11])( void );
 };
 
-extern struct MenuStruct const Menuc[];
+extern const struct MenuStruct Menuc[];
 
 typedef struct MenuStack 
 {
@@ -391,7 +386,5 @@ char FirstLine;
 #define CAM_ON 0x10
 
 #define NODE_ID 0x6e
-
-extern char UpdateMenu;
 
 #endif

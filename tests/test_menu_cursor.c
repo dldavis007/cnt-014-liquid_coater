@@ -18,19 +18,19 @@
  *     else if ( CursorUpFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog2 ) )
  *         CursorUpFlag = 0;
  *
- * That comparison is the fragile part. The flags were originally plain `char`,
- * which works on ICC12 (it truncates char compares to 8 bits, so 0xFF matches
- * -1) but was DEAD under host GCC with -funsigned-char, where the flag promotes
- * to int 255 and `255 == -1` is false. The flag then never returned to 0, stayed
- * truthy, and one button press scrolled the entire menu forever at ~3 Hz.
- * See pc_side/README.md, "ICC12 vs GCC: the char comparison trap".
+ * That comparison is the fragile part, and it depends on the flags being
+ * signed. As plain `char` they broke under host GCC with -funsigned-char: the
+ * flag promoted to 255, `255 == -1` was false, so the flag never returned to 0
+ * and the cursor free-ran at ~3 Hz. The flags are now declared `signed char`,
+ * which makes the plain `== -1` compare correct on both compilers.
+ * See pc_side/README.md, "the char comparison trap".
  *
  * What these tests do and do not cover
  * ------------------------------------
  * They cover the BEHAVIOUR: a press moves the cursor, a hold repeats, a release
  * stops it. That contract is real on both compilers, so it is worth pinning
- * regardless of which one exposed the break. Dropping `signed` from the flag
- * declarations makes `test_release_stops_the_cursor` fail immediately.
+ * regardless of which one exposed the break. Building against the unguarded
+ * Subroutines1.c makes five of these tests fail.
  *
  * They CANNOT verify target codegen - no host test can. Whether the declaration
  * changes ICC12 output is a build-time object-file A/B, not a unit test.
@@ -67,7 +67,7 @@ extern signed char   CursorDownFlag;
 extern signed char   SelectFlag;
 extern struct MenuStack MenuStackc[];
 
-/* 0x180 button-box word bits, as emulators/button_box_panel.py sends them and
+/* 0x180 button-box word bits, as can_emulators' button_box_panel.py sends them and
  * as Interrupts.h names them (TeleData_*). */
 #define BB_KEEPALIVE 0x0400
 #define BB_SELECT    0x0004      /* TeleData_PLCTrig  */
@@ -134,8 +134,8 @@ void tearDown(void) { }
  * ============================================================ */
 
 /* Executable documentation of the invariant the release test depends on:
- * a signed char assigned -1 must compare equal to -1, whatever the plain-char
- * signedness of the build. */
+ * a signed char assigned -1 must compare equal to -1, whatever the
+ * plain-char signedness of the build. */
 static void test_char_sentinel_survives_the_round_trip(void)
 {
     signed char flag = -1;
@@ -199,7 +199,7 @@ static void test_holding_up_repeats(void)
 }
 
 /* ============================================================
- * Release - THE REGRESSION. Reverting `== (char)-1` to `== -1` fails here.
+ * Release - THE REGRESSION. If the flags lose their `signed`, fails here.
  * ============================================================ */
 
 static void test_release_returns_the_flag_to_idle(void)
@@ -207,8 +207,6 @@ static void test_release_returns_the_flag_to_idle(void)
     set_word(BB_KEEPALIVE | BB_UP);
     pass();
     menu_window();
-    /* Works only because the flag is declared signed char: a plain char would
-     * hold 255 under -funsigned-char and never match -1. */
     TEST_ASSERT_TRUE_MESSAGE(CursorUpFlag == -1,
         "after acting, the flag should hold the -1 'handled' sentinel");
 

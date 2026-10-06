@@ -14,6 +14,13 @@ void EEWrite ( int ArraySize, char WriteData[], int *WriteAddr );
 
 #define WordPrg 0x20
 #define SecErase 0x40
+#ifdef PC_EEPROM
+/* PC host: EEPROM image in RAM, persisted to a file (pc_side_host.c) */
+#define EE_size 0x0800
+extern unsigned char pc_eeprom[EE_size];
+#define EE_begin ((int)pc_eeprom)
+#else
 #define EE_begin 0x0800
+#endif
 
 #endif

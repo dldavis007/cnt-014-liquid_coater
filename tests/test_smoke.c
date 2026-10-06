@@ -2,7 +2,7 @@
  * the production sources link, the RTI sim drives real firmware timers, and
  * the CAN seams capture/inject frames.
  *
- * Rev4.33 note: the RTI ISR here is monolithic (SourceFiles/Interrupts.c drives
+ * Rev4.33 note: the RTI ISR here is monolithic (../Interrupts.c drives
  * StateTime and every other timer directly), so unlike Rev4.34 there is no
  * Register_RTI_Callback step — the sim thread calls RTI_Int_Handler() and the
  * firmware's timers move.
@@ -45,7 +45,7 @@ static void test_rti_ticks_advance_state_time(void)
 }
 
 /* The pacing service is what keeps Rev4.33's production `while (Timer1)` waits
- * in Display()/sendPackets() from hanging the suite. Prove it clears Timer1
+ * in Display()/PositionDisplay() from hanging the suite. Prove it clears Timer1
  * without the RTI sim running at all — that separation is the whole point:
  * StateTime must stay under advance_ticks() control. */
 static void test_pacing_service_clears_timer1_without_advancing_state_time(void)

@@ -10,12 +10,12 @@
  *     status bits that never change here
  *   - the CAN transport: MCOHW_PushMessage / MCOHW_PullMessage over UDP, so the
  *     firmware exchanges real CAN frames with the Python emulators in
- *     emulators/ (same wire format as can_udp.py)
+ *     C:\Working_Projects\can_emulators (same wire format as lib/can_udp.py)
  *   - the RTI simulation thread: drives the real RTI_Int_Handler() so firmware
  *     timers (StateTime, Timer1/2, MenuTimer, ...) count down
  *
  * The REAL menu engine, MicroCANopen stack and node config (Subroutines.c,
- * Subroutines1.c, MenuSerialize.c, Packets.c, mco.c, user.c, Interrupts.c) are
+ * Subroutines1.c, mco.c, user.c, Interrupts.c) are
  * compiled in, so MCO_ProcessStack genuinely maps RPDOs into gProcImg[] and
  * emits TPDOs. This file only supplies the CAN hardware layer beneath them.
  *
@@ -23,7 +23,7 @@
  * ------------------
  * Rev4.33 paces its CAN display frames with Timer1 busy-waits
  * (`Timer1 = RTI_One_Sec * .05; while (Timer1);` in Display(), and the same
- * shape in Packets.c). Those are NOT #ifdef'd out for the host build the way
+ * shape elsewhere). Those are NOT #ifdef'd out for the host build the way
  * Rev4.34's MCOHW_GetTime pacing is — the RTI thread below decrements Timer1
  * exactly as the target's real RTI interrupt does, so the spins simply end.
  * That keeps the production pacing code on the host path instead of compiling
@@ -41,6 +41,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /* windows.h defines TRUE/FALSE; the firmware headers redefine them. Drop the
  * Win32 ones so the firmware's definitions win without a warning. */
@@ -50,11 +51,13 @@
 #include "nodecfg.h"
 #include "mco.h"
 #include "mcohw.h"
+#include "mc9s12a128.h"     /* CANRFLG, backed by sfr_regs[] */
 #include "Subroutines.h"    /* OscClk, which RTI_One_Sec is built from */
 #include "Interrupts.h"     /* RTI_One_Sec: ticks/sec the firmware assumes */
+#include "EEProm.h"         /* EE_size, pc_eeprom */
 #include "pc_log.h"
 
-void RTI_Int_Handler(void);   /* production ISR, SourceFiles/Interrupts.c */
+void RTI_Int_Handler(void);   /* production ISR, ../Interrupts.c */
 
 /* ==========================================================================
  * SFR backing array + host runtime globals
@@ -63,13 +66,100 @@ unsigned char sfr_regs[0x400];
 volatile int  g_intr_masked = 1;    /* masked at reset (see pc_side.h) */
 
 /* ==========================================================================
+ * Hardware-fidelity options (--hw-* on the command line, parsed by main.c).
+ * On by default, at the target's values, so the SIL loses and delays frames
+ * where the target does. --no-hw turns them all off: lossless RX ring, every
+ * frame accepted, instant EEPROM writes and transmits.
+ * ========================================================================== */
+int pc_side_hw_rx_fifo     = 5;   /* RX frames held before overrun (MSCAN: 5); 0 = off */
+int pc_side_hw_filters     = 1;   /* apply mcohw.c's MSCAN acceptance filters */
+int pc_side_hw_ee_erase_ms = 20;  /* EEPROM sector erase time; 0 = instant */
+int pc_side_hw_can_tx      = 1;   /* transmits take bus time, as mcohw.c waits for them */
+
+/* One --hw-* option into the settings above. 1 if it was one. */
+int pc_side_hw_option(const char *arg)
+{
+    if (!strcmp(arg, "--no-hw")) {
+        pc_side_hw_rx_fifo = pc_side_hw_filters = pc_side_hw_ee_erase_ms = pc_side_hw_can_tx = 0;
+        return 1;
+    }
+    if (!strncmp(arg, "--hw-rx-fifo=", 13))     { pc_side_hw_rx_fifo     = atoi(arg + 13); return 1; }
+    if (!strncmp(arg, "--hw-can-filters=", 17)) { pc_side_hw_filters     = atoi(arg + 17); return 1; }
+    if (!strncmp(arg, "--hw-ee-erase-ms=", 17)) { pc_side_hw_ee_erase_ms = atoi(arg + 17); return 1; }
+    if (!strncmp(arg, "--hw-can-tx=", 12))      { pc_side_hw_can_tx      = atoi(arg + 12); return 1; }
+    return 0;
+}
+
+/* The active options as command-line text, for a reset relaunch. */
+static void hw_options_text(char *buf, size_t n)
+{
+    snprintf(buf, n, " --hw-rx-fifo=%d --hw-can-filters=%d --hw-ee-erase-ms=%d --hw-can-tx=%d",
+             pc_side_hw_rx_fifo, pc_side_hw_filters, pc_side_hw_ee_erase_ms, pc_side_hw_can_tx);
+}
+
+void pc_side_hw_log(void)
+{
+    char rx[24] = "unlimited", ee[24] = "instant";
+    if (pc_side_hw_rx_fifo)     snprintf(rx, sizeof rx, "%d frames", pc_side_hw_rx_fifo);
+    if (pc_side_hw_ee_erase_ms) snprintf(ee, sizeof ee, "%d ms/sector", pc_side_hw_ee_erase_ms);
+    LOG_PRINTF(("[host] hardware fidelity: RX FIFO %s, CAN filters %s, EEPROM %s, CAN TX %s\n",
+                rx, pc_side_hw_filters ? "on" : "off", ee,
+                pc_side_hw_can_tx ? "timed (125 kbit/s)" : "instant"));
+}
+
+/* ==========================================================================
  * Driver stubs. EEProm.c / Flash.c / mcohw.c are excluded from the build:
  * their real bodies spin on hardware status bits (EEPROM command-complete,
  * CAN transmit-buffer-empty) that never set on a PC.
  * ========================================================================== */
-void EEInit(void) { }
+/* EEPROM image (EE_begin points here under PC_EEPROM), kept in EE_FILE across
+ * runs and resets. No file = erased (0xFF), so Load_Variables restores defaults. */
+#define EE_FILE "eeprom.bin"
+unsigned char pc_eeprom[EE_size];
+
+static void ee_save(void)
+{
+    // opens EE_FILE for write
+    FILE *f = fopen(EE_FILE, "wb");
+    // writes pc_eeprom to EE_FILE; logs failure if it cannot write the full size
+    if (!f || fwrite(pc_eeprom, 1, EE_size, f) != EE_size)
+        LOG_PRINTF(("[host] EEPROM: failed to write %s\n", EE_FILE));
+    // closes file stream if opened
+    if (f) fclose(f);
+}
+
+void EEInit(void)
+{
+    // open EE_FILE for read
+    FILE *f = fopen(EE_FILE, "rb");
+    // fill pc_eeprom with 0xFF (erased state)
+    memset(pc_eeprom, 0xFF, EE_size);
+    // if file opened, read EE_size bytes into pc_eeprom; log success or failure
+    if (f) {
+        fread(pc_eeprom, 1, EE_size, f);
+        // close file stream if opened
+        fclose(f);
+        LOG_PRINTF(("[host] EEPROM: loaded %s\n", EE_FILE));
+    } else {
+        LOG_PRINTF(("[host] EEPROM: no %s, starting erased\n", EE_FILE));
+    }
+}
+
+/* The real EEWrite erases each 4-byte sector it touches, then programs it,
+ * spinning on every command; the erases dominate. */
 void EEWrite(int ArraySize, char WriteData[], int *WriteAddr)
-{ (void)ArraySize; (void)WriteData; (void)WriteAddr; }
+{
+    // if optional parameter pc_side_hw_ee_erase_ms is set, sleep for the calculated time based on the number of sectors to erase to simulate EEPROM blocking delay
+    if (pc_side_hw_ee_erase_ms) {
+        unsigned lead    = (unsigned)((size_t)WriteAddr & 3);
+        unsigned sectors = (lead + (unsigned)ArraySize + 3) / 4;
+        Sleep(sectors * (unsigned)pc_side_hw_ee_erase_ms);
+    }
+    // copy ArraySize bytes from WriteData to the address pointed by WriteAddr in pc_eeprom
+    memcpy((char *)WriteAddr, WriteData, ArraySize);
+    // save the updated EEPROM image to EE_FILE
+    ee_save();
+}
 
 void FlashInit(void) { }
 void FlashWrite(int ArraySize, char WriteData[], int *WriteAddr)
@@ -80,14 +170,53 @@ void FlashWrite(int ArraySize, char WriteData[], int *WriteAddr)
  * Non-zero from Init: 0 makes MCO_Init() treat init as failed and call
  * MCOUSER_FatalError(), which re-enters InitCANOpen() -> infinite recursion.
  * ========================================================================== */
-UNSIGNED8 MCOHW_Init(UNSIGNED16 BaudRate)            { (void)BaudRate; return 1; }
-UNSIGNED8 MCOHW_SetCANFilter(UNSIGNED16 CANID)       { (void)CANID;    return 1; }
-
 /* The acceptance-filter table mcohw.c owns. user.c clears it on reset, so the
- * symbol must exist even though nothing here filters — the UDP bus delivers
+ * symbol must exist even when nothing here filters — the UDP bus delivers
  * every frame and mco.c does its own CAN-ID matching. 0x80 is the "empty slot"
  * marker mcohw.c initialises it with. */
 UNSIGNED8 setFilters[8] = {0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+
+/* --hw-can-filters: the MSCAN filters mcohw.c programs. CANIDAC = 0x20 gives
+ * eight 8-bit filters on IDR0 (ID10..ID3); set_screener_std writes mask
+ * 0xFF80 >> 3 = 0xF0, so only ID bits 6..3 are compared. Unused filters stay
+ * code 0 / mask 0, which accepts IDs 0x000-0x007. */
+static UNSIGNED8 hw_filter_code[8];
+static UNSIGNED8 hw_filter_count = 0;    /* gCANFilter */
+
+UNSIGNED8 MCOHW_Init(UNSIGNED16 BaudRate)
+{
+    (void)BaudRate;
+    hw_filter_count = 0;
+    return 1;
+}
+
+/* Same bookkeeping as mcohw.c: one filter per distinct CANID & 0x7F. */
+UNSIGNED8 MCOHW_SetCANFilter(UNSIGNED16 CANID)
+{
+    UNSIGNED8 i, bin = CANID & 0x7F;
+    if (!pc_side_hw_filters)
+        return 1;
+    for (i = 0; i < 8; i++)
+        if (setFilters[i] == bin)
+            return 1;
+    if (hw_filter_count >= NR_OF_RPDOS)
+        return 0;
+    hw_filter_code[hw_filter_count] = (UNSIGNED8)(CANID >> 3);
+    setFilters[hw_filter_count]     = bin;
+    hw_filter_count++;
+    return 1;
+}
+
+static int hw_accepts(UNSIGNED16 id)
+{
+    UNSIGNED8 i, idr0 = (UNSIGNED8)(id >> 3);
+    if (!pc_side_hw_filters)
+        return 1;
+    for (i = 0; i < hw_filter_count; i++)
+        if ((idr0 & 0x0F) == (hw_filter_code[i] & 0x0F))
+            return 1;
+    return hw_filter_count < 8 && idr0 == 0;     /* an unused filter */
+}
 
 void      MCOHW_TimerISR(void) { }   /* time base is GetTickCount-driven */
 
@@ -110,7 +239,7 @@ UNSIGNED8 MCOHW_IsTimeExpired(UNSIGNED16 timestamp)
  * CAN transport over UDP
  *
  * Wire format, one datagram per frame (length = 3 + LEN) — must match
- * emulators/can_udp.py:
+ * can_emulators' lib/can_udp.py:
  *   byte 0-1 : CAN ID   (uint16, little-endian)
  *   byte 2   : LEN      (0..8)
  *   byte 3.. : LEN data bytes
@@ -248,21 +377,32 @@ static DWORD WINAPI can_rx_fn(LPVOID arg)
         if (n < 3) { Sleep(1); continue; }     /* no data (WSAEWOULDBLOCK)/short */
         {
             CAN_MSG  m;
-            unsigned nxt;
+            unsigned nxt, held;
+            int      overrun = 0;
             m.ID  = (UNSIGNED16)(pkt[0] | (pkt[1] << 8));
             m.LEN = pkt[2];
             if (m.LEN > 8) m.LEN = 8;
             if (n < 3 + (int)m.LEN) continue;
             memcpy(m.BUF, pkt + 3, m.LEN);
-            can_log("RX", m.ID, m.BUF, m.LEN);
+            if (!hw_accepts(m.ID))
+                continue;                      /* the MSCAN filters never see it */
 
             EnterCriticalSection(&rx_lock);
-            nxt = (rx_head + 1) % RX_RING_N;
-            if (nxt != rx_tail) {              /* drop if full */
+            held = (rx_head + RX_RING_N - rx_tail) % RX_RING_N;
+            nxt  = (rx_head + 1) % RX_RING_N;
+            if (pc_side_hw_rx_fifo && held >= (unsigned)pc_side_hw_rx_fifo) {
+                overrun = 1;                   /* MSCAN discards the new frame */
+            } else if (nxt != rx_tail) {       /* drop if full */
                 rx_ring[rx_head] = m;
                 rx_head = nxt;
             }
             LeaveCriticalSection(&rx_lock);
+            if (overrun) {
+                CANRFLG |= 0x02;               /* OVRIF, as the target would set */
+                can_log("RX OVERRUN, dropped", m.ID, m.BUF, m.LEN);
+            } else {
+                can_log("RX", m.ID, m.BUF, m.LEN);
+            }
         }
     }
     return 0;
@@ -335,6 +475,27 @@ void pc_side_can_shutdown(void)
     WSACleanup();
 }
 
+extern unsigned int Timer1;
+extern char         Gen_Flags;
+
+/* --hw-can-tx: mcohw.c arms Timer1 for 0.5 s and spins until the frame is on
+ * the bus, so every send blocks for its bit time and leaves Timer1 near 0.5 s.
+ * 125 kbit/s = 8 us/bit; 47 overhead bits + 8 per byte, no stuffing, idle bus. */
+static void hw_tx_wait(int len)
+{
+    LARGE_INTEGER freq, start, now;
+    double us = (47 + 8 * len) * 8.0;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+    Timer1 = 0.5 * RTI_One_Sec;
+    do {
+        QueryPerformanceCounter(&now);
+    } while ((double)(now.QuadPart - start.QuadPart) * 1e6 / (double)freq.QuadPart < us
+             && Timer1);
+    if (!Timer1)
+        Gen_Flags |= Gen_Flags_No2Wire;     /* as mcohw.c on a transmit timeout */
+}
+
 /* TX seam: firmware -> bus. */
 UNSIGNED8 MCOHW_PushMessage(CAN_MSG *m)
 {
@@ -346,8 +507,16 @@ UNSIGNED8 MCOHW_PushMessage(CAN_MSG *m)
     pkt[2] = m->LEN;
     len = m->LEN; if (len > 8) len = 8;
     memcpy(pkt + 3, m->BUF, len);
-    sendto(can_sock, (const char *)pkt, 3 + len, 0,
-           (struct sockaddr *)&can_peer, sizeof can_peer);
+    if (pc_side_hw_can_tx)
+        hw_tx_wait(len);                    /* receivers see it once it is sent */
+    if (sendto(can_sock, (const char *)pkt, 3 + len, 0,
+               (struct sockaddr *)&can_peer, sizeof can_peer) == SOCKET_ERROR) {
+        /* Host-side loss (e.g. send buffer full); the target would not drop it */
+        char dir[40];
+        snprintf(dir, sizeof dir, "TX SIL SEND FAILED (err %d), dropped", WSAGetLastError());
+        can_log(dir, m->ID, m->BUF, len);
+        return 1;
+    }
     can_log("TX", m->ID, m->BUF, len);
     return 1;
 }
@@ -375,7 +544,7 @@ UNSIGNED8 MCOHW_PullMessage(CAN_MSG *m)
  * firmware's INTR_OFF()/INTR_ON() critical sections real meaning here.
  *
  * On Rev4.33 this thread is load-bearing, not just a convenience: Display(),
- * PositionDisplay() and Packets.c's sendPackets() pace their CAN frames with
+ * and PositionDisplay() pace their CAN frames with
  * `Timer1 = <n>; while (Timer1);`, and Timer1 is decremented ONLY by
  * RTI_Int_Handler(). Without these ticks the first Display() call in the
  * coating sequence spins forever.
@@ -463,10 +632,9 @@ void rti_thread_stop(void)
  * here, so that spin is forever and RestoreDefaults() - which ends in ResetProc
  * - hangs the host. main.c's stall detector spots the spin and calls this.
  *
- * A reset is a RELAUNCH, not a jump back into main(): the restore only works
- * because startup re-initializes every global from its initializers (EEWrite is
- * a stub above and SKIP_EEPROM_LOAD skips the load, so a fresh process comes up
- * on the compiled-in defaults, exactly as the target does after the 0xFF flag).
+ * A reset is a RELAUNCH, not a jump back into main(): globals come back on their
+ * initializers, then Load_Variables reads eeprom.bin - keeping them if
+ * RestoreDefaults left the 0xFF flag, exactly as the target does.
  *
  * Called from the stall-detector thread, with the firmware thread still
  * spinning in ResetProc - nothing is asked of it. Closing the socket FIRST is
@@ -476,7 +644,8 @@ void rti_thread_stop(void)
 void pc_side_reset(void)
 {
     char exe[MAX_PATH];
-    char cmd[MAX_PATH + 32];
+    char cmd[MAX_PATH + 128];
+    char hw[96];
     STARTUPINFOA        si;
     PROCESS_INFORMATION pi;
 
@@ -491,8 +660,9 @@ void pc_side_reset(void)
     memset(&pi, 0, sizeof pi);
 
     if (GetModuleFileNameA(NULL, exe, sizeof exe)) {
-        snprintf(cmd, sizeof cmd, "\"%s\" %u %u",
-                 exe, can_recv_port, can_send_port);
+        hw_options_text(hw, sizeof hw);
+        snprintf(cmd, sizeof cmd, "\"%s\" %u %u%s",
+                 exe, can_recv_port, can_send_port, hw);
         /* Ports as arguments so the child skips the interactive prompts.
          * Inherit handles: without it a redirected run (a tee, a log capture)
          * loses the child's output at the reset. The socket is already closed,

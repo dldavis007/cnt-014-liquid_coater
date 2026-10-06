@@ -6,11 +6,9 @@
  *
  * Regression intent
  * -----------------
- * The coating sequence in 4.34 is line-for-line identical to 4.33 apart from
- * two deltas (see tests/REGRESSION.md). Everything asserted here is therefore
- * SHARED CONTRACT: these tests should pass unchanged against a 4.33 build of
- * the harness. The one 4.34-only behaviour is asserted in test_purge_retract.c
- * and marked there, so a 4.33 run has exactly one expected failure.
+ * Carried over from the refactored 4.33 suite. Against the production 4.33
+ * the only change needed was head/pump ON (see test_trigstate_turns_head_on):
+ * production turns them on correctly; the refactored revisions regressed it.
  *
  * Several states deliberately execute BOTH of their ifs in one pass, which
  * produces outcomes that look like bugs and are easy to "fix" by accident.
@@ -85,33 +83,23 @@ static void test_trigstate_arms_cycle_and_turns_head_on(void)
         "TrigState should clear Cycle_Complete");
 }
 
-/* CHARACTERISATION OF A KNOWN BUG - see tests/REGRESSION.md.
+/* Production 4.33 turns the head on with strncpy(str_value," ON") + getvalue,
+ * which matches the " ON" enum token, so .value and the ramp test's
+ * `!strcmp(HeadOnOff.str_value," ON")` both see ON.
  *
- * TrigState calls update_menu_var_by_str(&HeadOnOff, "ON"), but the enum is
- * "OFF, ON", so strtok yields the tokens "OFF" and " ON" - WITH a leading
- * space. getvalue() finds no match for "ON", leaves .value untouched, and
- * str_value becomes "ON", which the head-ramp test at unit.c:810
- * (`!strcmp(HeadOnOff.str_value," ON")`) then rejects. Net effect: the
- * coating sequence never actually spins the head up.
- *
- * 4.30a did `strncpy(str_value," ON",...)` and worked. 4.33 and 4.34 share
- * the broken form, so this is NOT a 4.33->4.34 regression - it arrived with
- * the menu refactor before 4.33.
- *
- * Asserted as-is so the suite is a truthful baseline. WHEN THIS IS FIXED
- * (pass " ON", or use update_menu_var_by_value(&HeadOnOff, 2.0f)) this test
- * will fail - flip it to expect 2 / " ON" at that point. */
-static void test_KNOWN_BUG_trigstate_head_on_is_a_no_op(void)
+ * The refactored 4.33 / 4.34 replaced this with update_menu_var_by_str(&X,"ON")
+ * - no leading space, so nothing matches and the head never spins up. Their
+ * suites pin that as test_KNOWN_BUG_trigstate_head_on_is_a_no_op: it is a
+ * regression introduced AFTER this production release. */
+static void test_trigstate_turns_head_on(void)
 {
     State = TrigState;
     update_menu_var_by_str(&HeadOnOff, "OFF");
 
     doevents();
 
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (int)HeadOnOff.value,
-        "BUG: head stays OFF - by_str(\"ON\") does not match the \" ON\" enum token");
-    TEST_ASSERT_EQUAL_STRING_MESSAGE("ON", HeadOnOff.str_value,
-        "BUG: str_value lacks the leading space the ramp test requires");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(2, (int)HeadOnOff.value, "head should be ON");
+    TEST_ASSERT_EQUAL_STRING(" ON", HeadOnOff.str_value);
 }
 
 /* The same call with the correctly-spaced token does work - this is the fix. */
@@ -416,10 +404,9 @@ static void test_startcleanout_primes_pump_when_retract_time_set(void)
 
     TEST_ASSERT_EQUAL_INT_MESSAGE(75, (int)PumpSpd.value,
         "RetractTime set: clean-out should drop the pump to 75%");
-    /* KNOWN BUG (same root cause as the head, see REGRESSION.md): by_str("ON")
-     * does not match the " ON" enum token, so the pump is never marked on. */
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (int)PumpOnOff.value,
-        "BUG: pump stays OFF - by_str(\"ON\") does not match the \" ON\" token");
+    /* Production marks the pump ON (strncpy " ON" + getvalue); the refactored
+     * revisions' by_str("ON") regression leaves it OFF - see the head test. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(2, (int)PumpOnOff.value, "pump should be ON");
     TEST_ASSERT_EQUAL_INT_MESSAGE(100, OldPumpSpeed,
         "the previous pump speed should be saved for restoration");
 }
@@ -556,7 +543,7 @@ int main(void)
     UNITY_BEGIN();
 
     RUN_TEST(test_trigstate_arms_cycle_and_turns_head_on);
-    RUN_TEST(test_KNOWN_BUG_trigstate_head_on_is_a_no_op);
+    RUN_TEST(test_trigstate_turns_head_on);
     RUN_TEST(test_head_on_works_with_the_spaced_enum_token);
     RUN_TEST(test_trigstate_commands_purge_retract);
     RUN_TEST(test_trigstate_displays_coating);
