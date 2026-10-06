@@ -11,3 +11,5 @@ pc_side/*.d
 pc_side/*.exe
 pc_side/*.log
 pc_side/*.err
+pc_side/build/
+pc_side/eeprom.bin

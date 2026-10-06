@@ -1798,7 +1798,7 @@ void CameraMain1 ( void )
     }
 
     //command to transmit address
-    if ( gProcImg[OUT_digi_10] == 0x02 && !addr_tx_pending )   //called by scan_camera in 2-wire
+    if ( gProcImg[OUT_digi_10] == 0x02)   //called by scan_camera in 2-wire
     {
         //make delay proportional to camera address so cameras report in ascending order
         addr_tx_time = MCOHW_GetTime() + cam_add1/100;

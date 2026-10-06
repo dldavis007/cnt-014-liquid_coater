@@ -226,6 +226,17 @@ struct menu_var MachineSize= {
 	   2,1,1,2,0,2,"24",enum_12_24_str
 }; //"12" OR "24"
 
+struct menu_var InternalExternalCameraSetting= {
+	   1,1,1,2,0,8,"INTERNAL",enum_internal_external_cameras
+};
+struct menu_var Cam1Enable = {
+    1,1,1,2,0,8," ENABLED",enum_enabled_disabled_cameras
+};
+
+struct menu_var Cam2Enable = {
+    1,1,1,2,0,8," ENABLED",enum_enabled_disabled_cameras
+};
+
 struct menu_var  FirstStrokePmpSpd[10] = {
 	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
 	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
@@ -330,6 +341,9 @@ struct menu_var SecondStrokeCtr[10]  = {
 	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[9]
 };
 
+
+
+
 //The following Menu Variables are NOT saved in EEPROM
 struct menu_var  disp_add1 = {
 	   1,1,1,46,0,-4,"4AF2",enum_alpha_str
@@ -360,16 +374,6 @@ struct menu_var  CamTag2 = {
 	   1,1,1,46,0,-11,"INSPECT CAM",enum_alpha_str
 }; //"COATER CAM "
 
-struct menu_var InternalExternalCameraSetting= {
-	   1,1,1,2,0,8,"INTERNAL",enum_internal_external_cameras
-};
-struct menu_var Cam1Enable = {
-    1,1,1,2,0,8," ENABLED",enum_enabled_disabled_cameras
-};
-
-struct menu_var Cam2Enable = {
-    1,1,1,2,0,8," ENABLED",enum_enabled_disabled_cameras
-};
 
 
 
@@ -2285,7 +2289,7 @@ void Save_Variables ( void )
 void Load_Camera_Add ( void )
 {
     char *VarEEPROMPntr2;
-    VarEEPROMPntr2 = (char *)0x0b00;
+    VarEEPROMPntr2 = (char *)(0x0300 + EE_begin);
     
     cam_addx1[0] = *VarEEPROMPntr2;
     cam_addx1[1] = *(VarEEPROMPntr2 + 1);   

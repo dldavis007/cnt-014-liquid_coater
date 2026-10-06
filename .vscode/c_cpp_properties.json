@@ -17,7 +17,7 @@
             ],
             "defines": [
                 "PC_SIDE",
-                "SKIP_EEPROM_LOAD",
+                "PC_EEPROM",
                 "diag"
             ],
             "forcedInclude": [

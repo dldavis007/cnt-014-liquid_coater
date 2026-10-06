@@ -6,9 +6,8 @@
  *
  * Init mirrors Controller.c's main() minus the hardware bring-up
  * (InitPLL, PWMInit, AtoDInit): those busy-wait on status bits that never
- * change on a PC. EEInit() is stubbed in pc_side_host.c, and Load_Variables /
- * Load_Serial_Num / Load_Camera_Add are skipped under SKIP_EEPROM_LOAD because
- * the EEPROM is reached through absolute addresses Windows cannot map.
+ * change on a PC. The EEPROM is a host image persisted to eeprom.bin
+ * (pc_side_host.c), so the EEPROM loads run unchanged.
  *
  * Note Rev4.33's doevents() has NO internal loop — Controller.c's main() calls
  * it from a while(1), so the loop lives here, exactly as on the target.
@@ -62,7 +61,7 @@ extern unsigned  cam_add1;
 extern unsigned  cam_add2;
 extern struct menu_var NullVar;
 
-void EEInit(void);          /* stubbed in pc_side_host.c (EEProm.c not compiled) */
+void EEInit(void);          /* pc_side_host.c (EEProm.c not compiled) */
 
 /* pc_side_host.c entry points. */
 int  pc_side_can_init(unsigned short recv_port, unsigned short send_port);
@@ -333,7 +332,7 @@ int main(int argc, char **argv)
     LOG_PRINTF(("[host] bringing up the unit...\n"));
     InitPorts();
     InitInterrupts();
-    EEInit();                    /* stubbed in pc_side_host.c */
+    EEInit();                    /* loads eeprom.bin (pc_side_host.c) */
 
     /* Real-time RTI simulation. On Rev4.33 this must be running before any
      * Display() call: Display() paces its CAN frames with `while (Timer1)` and
@@ -345,22 +344,26 @@ int main(int argc, char **argv)
 
     CreateThread(NULL, 0, loop_watchdog_fn, NULL, 0, NULL);   /* stall detector */
 
+    /* Controller.c's order. After the stall detector, so a ResetProc from a
+     * corrupt image is caught and relaunched. */
+    Load_Camera_Add();
+    Load_Serial_Num();
+    Load_Variables();
+
     InitCANOpen();
     LOG_PRINTF(("[host] unit + CANopen up, interrupts enabled\n"));
 
-    InternalExternalCameraSetting.value = 2.0f;  /* default to HD active camera, for testing at least */
-    LOG_PRINTF(("[host] InternalExternalCameraSetting.value = %.1f (default External active camera for testing, default internal in production)\n", InternalExternalCameraSetting.value));
+    // InternalExternalCameraSetting.value = 2.0f;  /* default to HD active camera, for testing at least */
+    // LOG_PRINTF(("[host] InternalExternalCameraSetting.value = %.1f (default External active camera for testing, default internal in production)\n", InternalExternalCameraSetting.value));
 
     /* Park the coater idle so the coating sequence is a no-op until commanded
      * (the trigger arrives over CAN, as on the target). */
     State = FinishState;
 
-    /* Camera addresses normally come from EEPROM (Load_Camera_Add), which the
-     * host skips — leaving both 0, which makes CameraMain1/2's address-match
-     * test trivially true EVERY pass and floods the bus with display frames.
-     * Seed distinct nonzero values so a match needs a real reply. */
-    cam_add1 = 0x1928;
-    cam_add2 = 0x2526;
+    /* Erased EEPROM gives both cameras 0xFFFF; seed distinct test addresses
+     * until real ones are saved. */
+    if (cam_add1 == 0xFFFF) cam_add1 = 0x1928;
+    if (cam_add2 == 0xFFFF) cam_add2 = 0x2526;
 
     /* Assert the camera-present input. doevents() only accepts the start
      * trigger when (VSEL_PORT & CAM_ON) is set; that is a GPIO on the target,

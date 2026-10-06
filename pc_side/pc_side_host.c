@@ -54,6 +54,7 @@
 #include "mc9s12a128.h"     /* CANRFLG, backed by sfr_regs[] */
 #include "Subroutines.h"    /* OscClk, which RTI_One_Sec is built from */
 #include "Interrupts.h"     /* RTI_One_Sec: ticks/sec the firmware assumes */
+#include "EEProm.h"         /* EE_size, pc_eeprom */
 #include "pc_log.h"
 
 void RTI_Int_Handler(void);   /* production ISR, ../Interrupts.c */
@@ -111,18 +112,53 @@ void pc_side_hw_log(void)
  * their real bodies spin on hardware status bits (EEPROM command-complete,
  * CAN transmit-buffer-empty) that never set on a PC.
  * ========================================================================== */
-void EEInit(void) { }
+/* EEPROM image (EE_begin points here under PC_EEPROM), kept in EE_FILE across
+ * runs and resets. No file = erased (0xFF), so Load_Variables restores defaults. */
+#define EE_FILE "eeprom.bin"
+unsigned char pc_eeprom[EE_size];
+
+static void ee_save(void)
+{
+    // opens EE_FILE for write
+    FILE *f = fopen(EE_FILE, "wb");
+    // writes pc_eeprom to EE_FILE; logs failure if it cannot write the full size
+    if (!f || fwrite(pc_eeprom, 1, EE_size, f) != EE_size)
+        LOG_PRINTF(("[host] EEPROM: failed to write %s\n", EE_FILE));
+    // closes file stream if opened
+    if (f) fclose(f);
+}
+
+void EEInit(void)
+{
+    // open EE_FILE for read
+    FILE *f = fopen(EE_FILE, "rb");
+    // fill pc_eeprom with 0xFF (erased state)
+    memset(pc_eeprom, 0xFF, EE_size);
+    // if file opened, read EE_size bytes into pc_eeprom; log success or failure
+    if (f) {
+        fread(pc_eeprom, 1, EE_size, f);
+        // close file stream if opened
+        fclose(f);
+        LOG_PRINTF(("[host] EEPROM: loaded %s\n", EE_FILE));
+    } else {
+        LOG_PRINTF(("[host] EEPROM: no %s, starting erased\n", EE_FILE));
+    }
+}
 
 /* The real EEWrite erases each 4-byte sector it touches, then programs it,
  * spinning on every command; the erases dominate. */
 void EEWrite(int ArraySize, char WriteData[], int *WriteAddr)
 {
-    (void)WriteData;
+    // if optional parameter pc_side_hw_ee_erase_ms is set, sleep for the calculated time based on the number of sectors to erase to simulate EEPROM blocking delay
     if (pc_side_hw_ee_erase_ms) {
         unsigned lead    = (unsigned)((size_t)WriteAddr & 3);
         unsigned sectors = (lead + (unsigned)ArraySize + 3) / 4;
         Sleep(sectors * (unsigned)pc_side_hw_ee_erase_ms);
     }
+    // copy ArraySize bytes from WriteData to the address pointed by WriteAddr in pc_eeprom
+    memcpy((char *)WriteAddr, WriteData, ArraySize);
+    // save the updated EEPROM image to EE_FILE
+    ee_save();
 }
 
 void FlashInit(void) { }
@@ -596,10 +632,9 @@ void rti_thread_stop(void)
  * here, so that spin is forever and RestoreDefaults() - which ends in ResetProc
  * - hangs the host. main.c's stall detector spots the spin and calls this.
  *
- * A reset is a RELAUNCH, not a jump back into main(): the restore only works
- * because startup re-initializes every global from its initializers (EEWrite is
- * a stub above and SKIP_EEPROM_LOAD skips the load, so a fresh process comes up
- * on the compiled-in defaults, exactly as the target does after the 0xFF flag).
+ * A reset is a RELAUNCH, not a jump back into main(): globals come back on their
+ * initializers, then Load_Variables reads eeprom.bin - keeping them if
+ * RestoreDefaults left the 0xFF flag, exactly as the target does.
  *
  * Called from the stall-detector thread, with the firmware thread still
  * spinning in ResetProc - nothing is asked of it. Closing the socket FIRST is

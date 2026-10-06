@@ -16,7 +16,7 @@
 # Deliberately NOT compiled:
 #   Controller.c  holds main() and the hardware bring-up; pc_side/main.c is the
 #                 host's entry point instead (and mirrors its init order).
-#   EEProm.c      absolute-address EEPROM access + spins on command-complete
+#   EEProm.c      spins on command-complete (pc_side_host.c emulates it on a file)
 #   Flash.c       same, for the flash writer
 #   mcohw.c       spins on CAN transmit-buffer status bits that never set
 #   Command.c     serial command console, reached only from the SCI ISRs
@@ -45,13 +45,13 @@ SHELL := cmd.exe
 SRC := ../Source_Files
 
 # PC_SIDE selects the host paths in the real headers (SFR array, no ISR pragmas,
-# no absolute-address vector table). SKIP_EEPROM_LOAD keeps the startup path off
-# the absolute-address EEPROM reads, which cannot be mapped on a PC.
+# no absolute-address vector table). PC_EEPROM points EE_begin at a host EEPROM
+# image, persisted to eeprom.bin (pc_side_host.c).
 # -Ddiag pins HeadSpeed to 8000 in RTI_Int_Handler (Interrupts.c). The head
 # tachometer is a timer input-capture on the target, so on the host HeadSpeed
 # stays 0 and CkHeadRotation always times out into HeadErrorState — the coating
 # sequence could never get past step 2.
-PC_DEF := -DPC_SIDE -DSKIP_EEPROM_LOAD -Ddiag
+PC_DEF := -DPC_SIDE -DPC_EEPROM -Ddiag
 
 # Force-include pc_side.h so INTR_ON/OFF are mapped before hc12def.h/Controller.h
 # /mcohw.h can define them to cli/sei.
@@ -86,7 +86,7 @@ HOST_OBJS := $(BUILD)/pc_side_host.o $(BUILD)/main.o
 OBJS      := $(UNIT_OBJS) $(HOST_OBJS)
 EXE       := pc_side_host.exe
 
-# Objects also depend on this Makefile: the -D flags (PC_SIDE, SKIP_EEPROM_LOAD,
+# Objects also depend on this Makefile: the -D flags (PC_SIDE, PC_EEPROM,
 # diag) live here, so editing them must force a rebuild. Without this, changing a
 # define silently leaves every object compiled against the old flags.
 MKFILE := $(firstword $(MAKEFILE_LIST))
