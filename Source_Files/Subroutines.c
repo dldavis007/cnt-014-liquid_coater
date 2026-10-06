@@ -15,8 +15,6 @@
 #include "mco.h" // added in Rev 4.29 for Reset_Max33011() function
 #include "EEProm.h"
 #include "string.h"
-#include "Packets.h"
-#include "MenuSerialize.h"
 
 char save_serial_flag=0;
 //Enum strings have a maximum length of 100 chars including the Null
@@ -30,6 +28,8 @@ const char enum_type_str[]="LIQUID,   FBE";
 const char enum_neg_pos_str[]="NEG,POS";
 const char enum_alpha_str[]=" ,A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,0,1,2,3,4,5,6,7,8,9,.,<,>,;,:,@,(,),-,-"; //last char is the cursor char, do not count for max
 const char enum_number_str[]="0,1,2,3,4,5,6,7,8,9,-";  //last char is the cursor char, do not count for max
+const char enum_internal_external_cameras[]="INTERNAL,EXTERNAL";  //enum for internal, external camera setting
+const char enum_enabled_disabled_cameras[]=" ENABLED,DISABLED";  //enum for internal, external camera setting
 
 
 char Variable_flag;
@@ -92,7 +92,6 @@ unsigned cam_add2;
 
 unsigned ran_num;  //used to create unique camera address  
 
-// signed: these are tri-state (0/1/-1) and the -1 compare must hold on both compilers
 signed char CursorDownFlag;
 signed char CursorUpFlag;
 signed char SelectFlag;
@@ -117,249 +116,264 @@ char Store_Flag = 0;
 
 //The following Menu Variables are saved in EEPROM
 struct menu_var  LightLevel1 = {
-	   10,1,0,10,0,2,"10",enum_NULL_str,NULL,0,0
+	   10,1,0,10,0,2,"10",enum_NULL_str
 };
 
 struct menu_var  LightLevel2 = {
-	   10,1,0,10,0,2,"10",enum_NULL_str,NULL,0,0
+	   10,1,0,10,0,2,"10",enum_NULL_str
 };
 
 struct menu_var PumpSpd= {
-	   100,1,0,100,0,3,"100",enum_NULL_str,NULL,0,0
+	   100,1,0,100,0,3,"100",enum_NULL_str
 };
 
 struct menu_var HeadSpd= {
-	   100,1,0,100,0,3,"100",enum_NULL_str,NULL,0,0
+	   100,1,0,100,0,3,"100",enum_NULL_str
 };
 
 struct menu_var CameraSpd= {
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0
+	   50,1,0,100,0,3," 50",enum_NULL_str
 };
 
 struct menu_var CameraTrip= {
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0
+	   50,1,0,100,0,3," 50",enum_NULL_str
 };
 
 struct menu_var CameraTurnTime= {
-	   0.5,0.1,0.0,9.9,1,3,"0.5",enum_NULL_str,NULL,0,0
+	   0.5,0.1,0.0,9.9,1,3,"0.5",enum_NULL_str
 };
 
 struct menu_var MaxLADist= {
-	   12,1,0,24,0,2,"12",enum_NULL_str,NULL,0,0
+	   12,1,0,24,0,2,"12",enum_NULL_str
 };
 
 struct menu_var MotorPol= {
-	   1,1,1,2,0,3,"NEG",enum_neg_pos_str,NULL,0,0
+	   1,1,1,2,0,3,"NEG",enum_neg_pos_str
 };
 
 struct menu_var TYPE= {
-	   1,1,1,2,0,6,"LIQUID",enum_type_str,NULL,0,0
+	   1,1,1,2,0,6,"LIQUID",enum_type_str
 };
 
 struct menu_var LA_TYPE= {
-	   2,1,1,2,0,7,"LIN ACT",enum_lin_act_str,NULL,0,0
+	   2,1,1,2,0,7,"LIN ACT",enum_lin_act_str
 };
 
 struct menu_var SecondStrokes= {
-	   10,1,0,10,0,2,"10",enum_NULL_str,NULL,0,0
+	   10,1,0,10,0,2,"10",enum_NULL_str
 };
 
 struct menu_var FirstStrokes= {
-	   5,1,0,10,0,2," 5",enum_NULL_str,NULL,0,0
+	   5,1,0,10,0,2," 5",enum_NULL_str
 };
 
 struct menu_var CleanOutStrokes= {
-	   5,1,0,10,0,2," 5",enum_NULL_str,NULL,0,0
+	   5,1,0,10,0,2," 5",enum_NULL_str
 };
 
 struct menu_var  RetractTime = {
-	   0,1,0,10,0,2," 0",enum_NULL_str,NULL,0,0
+	   0,1,0,10,0,2," 0",enum_NULL_str
 };
 
 struct menu_var HtrISOOnOff= {
-	   1,1,1,2,0,3,"OFF",enum_off_on_str,NULL,0,0
+	   1,1,1,2,0,3,"OFF",enum_off_on_str
 };
 
 struct menu_var HtrISOSetPnt= {
-	   120,1,32,199,0,3,"120",enum_NULL_str,NULL,0,0
+	   120,1,32,199,0,3,"120",enum_NULL_str
 };
 
 struct menu_var HtrBaseOnOff= {
-	   1,1,1,2,0,3,"OFF",enum_off_on_str,NULL,0,0
+	   1,1,1,2,0,3,"OFF",enum_off_on_str
 };
 
 struct menu_var HtrBaseSetPnt= {
-	   120,1,32,199,0,3,"120",enum_NULL_str,NULL,0,0
+	   120,1,32,199,0,3,"120",enum_NULL_str
 };
 
 struct menu_var HtrHoseOnOff= {
-	   2,1,1,2,0,3,"OFF",enum_off_on_str,NULL,0,0
+	   2,1,1,2,0,3,"OFF",enum_off_on_str
 };
 
 struct menu_var HtrHoseSetPnt= {
-	   120,1,32,199,0,3,"120",enum_NULL_str,NULL,0,0
+	   120,1,32,199,0,3,"120",enum_NULL_str
 };
 
 struct menu_var PGainISO= {
-	   10,1,1,20,0,2,"10",enum_NULL_str,NULL,0,0
+	   10,1,1,20,0,2,"10",enum_NULL_str
 };
 
 struct menu_var IGainISO= {
-	   0.03,0.01,0.01,0.20,2,4,"0.03",enum_NULL_str,NULL,0,0
+	   0.03,0.01,0.01,0.20,2,4,"0.03",enum_NULL_str
 };
 
 struct menu_var IMaxISO= {
-	   2500,100,100,5000,0,4,"2500",enum_NULL_str,NULL,0,0
+	   20,1,1,50,0,2,"20",enum_NULL_str
 };
 
 struct menu_var PGainBase= {
-	   10,1,1,20,0,2,"10",enum_NULL_str,NULL,0,0
+	   10,1,1,20,0,2,"10",enum_NULL_str
 };
 
 struct menu_var IGainBase= {
-	   0.03,0.01,0.01,0.20,2,4,"0.03",enum_NULL_str,NULL,0,0
+	   0.03,0.01,0.01,0.20,2,4,"0.03",enum_NULL_str
 };
 struct menu_var IMaxBase= {
-	   2500,100,100,5000,0,4,"2500",enum_NULL_str,NULL,0,0
+	   20,1,1,50,0,2,"20",enum_NULL_str
 };
 
 struct menu_var MachineSize= {
-	   2,1,1,2,0,2,"24",enum_12_24_str,NULL,0,0
+	   2,1,1,2,0,2,"24",enum_12_24_str
 }; //"12" OR "24"
 
+struct menu_var InternalExternalCameraSetting= {
+	   1,1,1,2,0,8,"INTERNAL",enum_internal_external_cameras
+};
+struct menu_var Cam1Enable = {
+    1,1,1,2,0,8," ENABLED",enum_enabled_disabled_cameras
+};
+
+struct menu_var Cam2Enable = {
+    1,1,1,2,0,8," ENABLED",enum_enabled_disabled_cameras
+};
+
 struct menu_var  FirstStrokePmpSpd[10] = {
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL
 };
 
 struct menu_var  FirstStrokeLASpd[10] = {
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[0],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[1],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[2],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[3],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[4],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[5],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[6],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[7],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[8],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[9],0,0
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[0],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[1],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[2],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[3],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[4],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[5],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[6],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[7],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[8],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&FirstStrokePmpSpd[9]
 };
 
 struct menu_var  FirstStrokeLen[10] = {
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[0],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[1],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[2],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[3],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[4],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[5],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[6],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[7],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[8],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[9],0,0
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[0],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[1],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[2],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[3],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[4],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[5],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[6],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[7],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[8],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&FirstStrokeLASpd[9]
 };	  
 
 struct menu_var FirstStrokeCtr[10]  = {
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[0],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[1],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[2],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[3],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[4],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[5],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[6],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[7],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[8],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[9],0,0
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[0],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[1],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[2],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[3],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[4],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[5],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[6],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[7],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[8],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&FirstStrokeLen[9]
 };
 
 struct menu_var  SecondStrokePmpSpd[10] = {
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0,
-	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,0,0
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL,
+	   50,1,0,100,0,3," 50",enum_NULL_str,NULL
 };
 
 struct menu_var  SecondStrokeLASpd[10] = {
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[0],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[1],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[2],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[3],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[4],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[5],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[6],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[7],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[8],0,0,
-	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[9],0,0
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[0],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[1],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[2],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[3],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[4],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[5],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[6],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[7],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[8],
+	   50,1,20,100,0,3," 50",enum_NULL_str,&SecondStrokePmpSpd[9]
 };
 
 struct menu_var  SecondStrokeLen[10] = {
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[0],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[1],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[2],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[3],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[4],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[5],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[6],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[7],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[8],0,0,
-	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[9],0,0
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[0],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[1],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[2],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[3],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[4],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[5],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[6],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[7],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[8],
+	   2,0.1,0.5,24,1,4," 2.0",enum_NULL_str,&SecondStrokeLASpd[9]
 };
 
 struct menu_var SecondStrokeCtr[10]  = {
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[0],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[1],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[2],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[3],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[4],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[5],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[6],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[7],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[8],0,0,
-	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[9],0,0
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[0],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[1],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[2],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[3],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[4],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[5],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[6],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[7],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[8],
+	   5,1,1,24,0,2," 5",enum_NULL_str,&SecondStrokeLen[9]
 };
+
+
+
 
 //The following Menu Variables are NOT saved in EEPROM
 struct menu_var  disp_add1 = {
-	   1,0,1,46,0,-4,"4AF2",enum_alpha_str,NULL,0,0
+	   1,1,1,46,0,-4,"4AF2",enum_alpha_str
 }; //Display only;
 struct menu_var  disp_add2 = {
-	   1,0,1,46,0,-4,"4AF3",enum_alpha_str,NULL,0,0
+	   1,1,1,46,0,-4,"4AF3",enum_alpha_str
 }; //Display only;
 
 struct menu_var  ZoomSpeed1 = {
-	   100,1,0,100,0,3,"100",enum_NULL_str,NULL,0,0
+	   100,1,0,100,0,3,"100",enum_NULL_str
 }; //0-100
 struct menu_var  FocusSpeed1 = {
-	   100,1,0,100,0,3,"100",enum_NULL_str,NULL,0,0
+	   100,1,0,100,0,3,"100",enum_NULL_str
 }; //0-100
 struct menu_var  ZoomSpeed2 = {
-	   100,1,0,100,0,3,"100",enum_NULL_str,NULL,0,0
+	   100,1,0,100,0,3,"100",enum_NULL_str
 }; //0-100
 struct menu_var  FocusSpeed2 = {
-	   100,1,0,100,0,3,"100",enum_NULL_str,NULL,0,0
+	   100,1,0,100,0,3,"100",enum_NULL_str
 }; //0-100
 struct menu_var  AdvanceTime = {
-	   1,1,0,100,0,3,"  1",enum_NULL_str,NULL,0,0
+	   1,1,0,100,0,3,"  1",enum_NULL_str
 }; //1-5
 struct menu_var  CamTag1 = {
-	   1,1,1,46,0,-11,"COATING CAM",enum_alpha_str,NULL,0,0
+	   1,1,1,46,0,-11,"COATING CAM",enum_alpha_str
 }; //"COATER CAM "
 struct menu_var  CamTag2 = {
-	   1,1,1,46,0,-11,"INSPECT CAM",enum_alpha_str,NULL,0,0
+	   1,1,1,46,0,-11,"INSPECT CAM",enum_alpha_str
 }; //"COATER CAM "
+
 
 
 
@@ -371,32 +385,35 @@ char cam_addx2[2];      //unique camera address from ran_num
 
 //saved seperately at 0x0b10
 struct menu_var SerialNum = {
-	   1,0,1,10,0,-6,"------",enum_number_str,NULL,0,0
+	   1,1,1,10,0,-6,"------",enum_number_str
 };
 
 //The following Menu Variables are NOT saved in EEPROM
 struct menu_var PumpOnOff= {
-	   1,1,1,2,0,3,"OFF",enum_off_on_str,NULL,0,0
+	   1,1,1,2,0,3,"OFF",enum_off_on_str
 };
 
 struct menu_var HeadOnOff= {
-	   1,1,1,2,0,3,"OFF",enum_off_on_str,NULL,0,0
+	   1,1,1,2,0,3,"OFF",enum_off_on_str
 };
 
 struct menu_var Rev = {
-	   1,0,1,46,0,-4,Revision,enum_alpha_str,NULL,0,0
+	   1,1,1,46,0,-4,Revision,enum_alpha_str
 };
 struct menu_var HtrISOTemp = {
-	   32,0,0,300,0,3," 32",enum_NULL_str,NULL,0,0
+	   32,1,0,300,0,3," 32",enum_NULL_str
 }; //0-100
+
+
 
 struct menu_var HtrBaseTemp = {
-	   32,0,0,300,0,3," 32",enum_NULL_str,NULL,0,0
+	   32,1,0,300,0,3," 32",enum_NULL_str
 }; //0-100
 
+//0xf5bc
+// #pragma abs_address:0x6200 
 
-
-struct MenuStruct const Menuc[MenuSize] = {
+const struct MenuStruct Menuc[MenuSize] = {     
                                         0,0,0,0,
                                         "    LIQUID COATER   ",
                                         " SETTINGS           ",
@@ -446,9 +463,9 @@ struct MenuStruct const Menuc[MenuSize] = {
                                             " PUMP SPEED         ",
                                             " LIN. ACT. DIST.    ",
                                             " L.A. TYPE          ",
+                                            " CAM LOC            ",
                                             " EXIT               ",
-                                            "                    ",
-                                            18,18,18,0,0,18,17,18,13,0,0,
+                                            18,18,18,0,0,18,17,18,13,12,0,
                                             &MachineSize,
                                             &FirstStrokes,
                                             &SecondStrokes,
@@ -458,19 +475,19 @@ struct MenuStruct const Menuc[MenuSize] = {
                                             &PumpSpd,
                                             &MaxLADist,
                                             &LA_TYPE,
-                                            &NullVar,
+                                            &InternalExternalCameraSetting,
                                             &NullVar,
                                             &StdVarFunction,
                                             &StdVarFunction,
                                             &StdVarFunction,
                                             &NullFunction,
                                             &NullFunction,
+                                            &StdVarFunction,
                                             &StdVarFunction,
                                             &StdVarFunction,
                                             &StdVarFunction,
                                             &StdVarFunction,
                                             &ExitMenu,
-                                            &NullFunction,
                                      		
                             
                                       		    0,0,1,4,
@@ -664,10 +681,10 @@ struct MenuStruct const Menuc[MenuSize] = {
                                       			"    HEATER SETUP    ",
                                       			" PGAIN BASE         ",
                                       			" IGAIN BASE         ",
-                                      			" ILIMIT BASE        ",
+                                      			" ILIMIT BASE     00 ",
                                       			" PGAIN ISO          ",
                                       			" IGAIN ISO          ",
-                                      			" ILIMIT ISO         ",
+                                      			" ILIMIT ISO      00 ",
                                       			" EXIT               ",
                                       			"                    ",
                                       			"                    ",
@@ -710,7 +727,7 @@ struct MenuStruct const Menuc[MenuSize] = {
                                             "                    ",
                                             "                    ",
                                             "                    ",
-                                            15,15,0,0,0,0,0,0,0,0,0,
+                                            15,15,17,0,0,0,0,0,0,0,0,
                                             &NullVar,
                                             &NullVar,
                                             &NullVar,
@@ -736,7 +753,7 @@ struct MenuStruct const Menuc[MenuSize] = {
                                             
                                             
                                                 0,0,5,1,
-                                                "       CAMERA-1     ",
+                                                "       CAMERA       ",
     											" SETTINGS           ",
                                                 " DIAGNOSTICS        ",
 												" STATUS             ",
@@ -774,31 +791,32 @@ struct MenuStruct const Menuc[MenuSize] = {
                                          
                                 
                                                     0,5,1,1,
-                                                    "   CAM-1 SETTINGS   ",
+                                                    "   CAMERA SETTINGS  ",
         											" LIGHTING           ",
         											" ZOOM SPEED         ",
         											" FOCUS SPEED        ",
         											" FILM ADVANCE       ",
-                                                    " TAG 1              ",
+                                                    " TAG                ",
+                                                    " STATUS             ",
                                                     " EXIT               ",
                                                     "                    ",
                                                     "                    ",
                                                     "                    ",
                                                     "                    ",
-                                                    "                    ",
-                                                    17,16,16,16,8,0,0,0,0,0,0,
+                                                    17,16,16,16,8,11,0,0,0,0,0,
                                                     &LightLevel1,
                                                     &ZoomSpeed1,//
                                                     &FocusSpeed1,//
                                                     &AdvanceTime,
                                                     &CamTag1,
-                                                    &NullVar,
+                                                    &Cam1Enable,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullFunction,
+                                                    &StdVarFunction,
                                                     &StdVarFunction,
                                                     &StdVarFunction,
                                                     &StdVarFunction,
@@ -808,11 +826,10 @@ struct MenuStruct const Menuc[MenuSize] = {
                                                     &NullFunction,
                                                     &NullFunction,
                                                     &NullFunction,
-                                                    &NullFunction,
                                      
                                     
                                                     0,5,1,2,
-                                                    " CAM-1 DIAGNOSTICS  ",
+                                                    " CAMERA DIAGNOSTICS ",
                                                     " ADVANCE FILM       ",
                                                     " ZOOM IN            ",
         											" ZOOM OUT           ",
@@ -850,7 +867,7 @@ struct MenuStruct const Menuc[MenuSize] = {
                                                      
                                                     
                                                     0,5,1,3,
-                                                    "  CAM-1 STATUS MENU ",
+                                                    "     STATUS MENU    ",
                                                     " SOFTWARE REV       ",
                                                     " CAMERA ID          ",
                                                     " SERIAL NUM         ",
@@ -888,7 +905,7 @@ struct MenuStruct const Menuc[MenuSize] = {
                                                     
                                                     
                                                 0,0,5,2,
-                                                "      CAMERA-2      ",
+                                                "       CAMERA       ",
     											" SETTINGS           ",
                                                 " DIAGNOSTICS        ",
 												" STATUS             ",
@@ -926,31 +943,32 @@ struct MenuStruct const Menuc[MenuSize] = {
                                          
                                 
                                                     0,5,2,1,
-                                                    "   CAM-2 SETTINGS   ",
+                                                    "   CAMERA SETTINGS  ",
         											" LIGHTING           ",
         											" ZOOM SPEED         ",
         											" FOCUS SPEED        ",
         											" FILM ADVANCE       ",
-                                                    " TAG 2              ",
+                                                    " TAG                ",
+                                                    " STATUS             ",
                                                     " EXIT               ",
                                                     "                    ",
                                                     "                    ",
                                                     "                    ",
                                                     "                    ",
-                                                    "                    ",
-                                                    17,16,16,16,8,0,0,0,0,0,0,
+                                                    17,16,16,16,8,11,0,0,0,0,0,
                                                     &LightLevel2,
                                                     &ZoomSpeed2,
                                                     &FocusSpeed2,
                                                     &AdvanceTime,
                                                     &CamTag2,
-                                                    &NullVar,
+                                                    &Cam2Enable,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullVar,
                                                     &NullFunction,
+                                                    &StdVarFunction,
                                                     &StdVarFunction,
                                                     &StdVarFunction,
                                                     &StdVarFunction,
@@ -960,11 +978,10 @@ struct MenuStruct const Menuc[MenuSize] = {
                                                     &NullFunction,
                                                     &NullFunction,
                                                     &NullFunction,
-                                                    &NullFunction,
                                              
                                     
                                                     0,5,2,2,
-                                                    "  CAM-2 DIAGNOSTICS ",
+                                                    " CAMERA DIAGNOSTICS ",
                                                     " ADVANCE FILM       ",
                                                     " ZOOM IN            ",
         											" ZOOM OUT           ",
@@ -1002,7 +1019,7 @@ struct MenuStruct const Menuc[MenuSize] = {
                                                      
                                                     
                                                     0,5,2,3,
-                                                    " CAM-2 STATUS MENU  ",
+                                                    "     STATUS MENU    ",
                                                     " SOFTWARE REV       ",
                                                     " CAMERA ID          ",
                                                     " SERIAL NUM         ",
@@ -1115,6 +1132,7 @@ struct MenuStruct const Menuc[MenuSize] = {
                                             &NullFunction
  
 };
+#pragma end_abs_address
 
 
 struct MenuStack MenuStackc[MenuStackSize] = {0,0,0,0,1,0};
@@ -1346,12 +1364,8 @@ void StdVarFunc_String ( struct menu_var *var )
     var->value = var->max+1; 	 //the last char in the enum list is used as a cursor
     getstrval(var);				 //put it in the string temporarily   
     LoadMenu ( MenuStackc[StackPointer].Index );
-    
-    update_menu_var_by_value(var, old_value); // Update the value member of the variable in the python GUI
-    // var->value = old_value;
-    // getstrval(var);
-    // update_value_gui(var); //Update the value member of the variable in the python GUI; honestly not sure if this is needed here
-
+    var->value = old_value;
+    getstrval(var);
 }
 
 // This points to the next char in "String Type" variables and puts in Menu, or goes to next variable
@@ -1672,7 +1686,7 @@ int RestoreDefaults ( void )
 {
  	LightLevel1.str_value[0] = 0xFF;    
 	gProcImg[OUT_digi_0] &= ~0x01;
-	MCO_ProcessStack_Menu();
+	MCO_ProcessStack();
 	Timer1 = RTI_One_Sec * .10;
     while ( Timer1 );
 	Save_Variables();    
@@ -1717,20 +1731,17 @@ void CursorDown( void )
 
 void IncVariable ( void )
 {
-     incvar(getVariable());
-     LoadMenu ( MenuStackc[StackPointer].Index );
-     DisplayTitler ();
-     update_value_gui(getVariable()); // sends new updated value to python GUI (on x200) across CAN
-} 
+    incvar(getVariable());
+    LoadMenu ( MenuStackc[StackPointer].Index );
+    DisplayTitler ();
+}
 
 void DecVariable ( void )
 {
-     decvar(getVariable());
-     LoadMenu ( MenuStackc[StackPointer].Index );
-     DisplayTitler ();
-     update_value_gui(getVariable()); // sends new updated value to python GUI (on x200) across CAN
+    decvar(getVariable());
+    LoadMenu ( MenuStackc[StackPointer].Index );
+    DisplayTitler (); 
 }
- 
 
 void CkCntrLength ( struct menu_var *var )
 {
@@ -1843,7 +1854,7 @@ void DeSelect ( void )
 		{
 		    ARMCOP = 0x55;
 			ARMCOP = 0xAA;
-			i = MCO_ProcessStack_Menu();
+			i = MCO_ProcessStack();
 		}
         //Save_Variables ();
         Store_Flag = 1;
@@ -2077,7 +2088,7 @@ void DisplayTitler ( void )
     		}
 			Timer1 = RTI_One_Sec * .006;
 			while ( Timer1 );
-			l = MCO_ProcessStack_Menu();
+			l = MCO_ProcessStack();
 		}
 	}
 
@@ -2134,7 +2145,7 @@ void Display ( char buff[] )
         }
     	Timer1 = RTI_One_Sec * .006;
     	while ( Timer1 );
-		MCO_ProcessStack_Menu();
+		MCO_ProcessStack();
     	
 	}
 	gTxMsg.ID = WIM_ID;
@@ -2278,7 +2289,7 @@ void Save_Variables ( void )
 void Load_Camera_Add ( void )
 {
     char *VarEEPROMPntr2;
-    VarEEPROMPntr2 = (char *)0x0b00;
+    VarEEPROMPntr2 = (char *)(0x0300 + EE_begin);
     
     cam_addx1[0] = *VarEEPROMPntr2;
     cam_addx1[1] = *(VarEEPROMPntr2 + 1);   
@@ -2301,10 +2312,8 @@ void UpdateArrayVariables ( struct menu_var *var, char num )
         while (i++ < num-1)
         {
             var++;
-        	// strncpy (&var->str_value[0],tempstr,var->len_str);
-        	// getvalue(var,0);
-            // update_value_gui(var); //Update the value member of the variable in the python GUI
-            update_menu_var_by_str(var, tempstr); // Update the value member of the variable in the python GUI
+        	strncpy (&var->str_value[0],tempstr,var->len_str);
+        	getvalue(var,0);
         }
 		LoadMenu ( MenuStackc[StackPointer].Index );
 		DisplayTitler ();

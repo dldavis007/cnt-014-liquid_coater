@@ -3,13 +3,10 @@
  * Covers the purge-retract path of the coating sequence, ported from
  * Rev 4.30a's test_doevents_state.c by way of the Rev4.34 suite.
  *
- * What changed in 4.30a and is being verified here:
- *   - a 20 s PurgeRetractWait timeout now routes to PurgeRetractWaitErrorState
- *     (110) instead of the generic ErrorState (99), so the operator sees
- *     "Warn:PURGE TIMEOUT" rather than "Warn:TIMEOUT ERROR"
- *   - the new state stops head and pump and returns to FinishState — the same
- *     post-conditions as ErrorState, which the last group asserts directly so
- *     the two are shown to be behaviourally equivalent.
+ * Production 4.33 behaviour: a 20 s PurgeRetractWait timeout goes to the
+ * generic ErrorState (99) - "Warn:TIMEOUT ERROR", head and pump off, then
+ * FinishState. The dedicated PurgeRetractWaitErrorState (110) only exists in
+ * the later refactored 4.33 / 4.34, so it is not tested here.
  *
  * Rev4.33 signal mapping: the purge-unit "moving" byte is gProcImg[IN_digi_31]
  * and the actuator-moving byte is gProcImg[OUT_digi_7]. The suite never names
@@ -18,11 +15,8 @@
  * rewrite of the tests. (Rev4.34 reaches the same two bytes as
  * *rpdo7_purge_moving and *rpdo4_actuator_moving.)
  *
- * Rev4.33 also differs in that PurgeRetractWaitErrorState stops the head and
- * pump through update_menu_var_by_str(&X, "OFF") rather than writing .value
- * directly, matching its sibling ErrorState/HeadErrorState in Subroutines1.c.
- * Both land on .value == 1 (the enum is "OFF, ON", 1-based), so the assertions
- * below are unchanged from the 4.34 suite.
+ * Production ErrorState stops the head with strncpy + getvalue and then writes
+ * .value = 1 for head and pump. The enum is "OFF, ON", 1-based, so OFF == 1.
  *
  * Isolation: doevents() does a full pass (menu, serialization, CANopen) before
  * reaching switch(State). setUp() quiets every input path that could move the
@@ -60,12 +54,8 @@ static unsigned long purge_timeout(void)
     return (unsigned long)(RTI_One_Sec * 20) + 1;
 }
 
-/* Turn an on/off menu var ON, setting BOTH fields.
- * Setting .value alone is not a valid machine state and would not exercise the
- * error paths: update_menu_var_by_str() (used by ErrorState/HeadErrorState and
- * by PurgeRetractWaitErrorState) early-returns when str_value already matches
- * its target, so it would never touch .value. The enum is "OFF, ON", hence the
- * leading space on " ON". */
+/* Turn an on/off menu var ON, setting BOTH fields so the machine state is
+ * consistent. The enum is "OFF, ON", hence the leading space on " ON". */
 static void set_on(struct menu_var *v)
 {
     strncpy(v->str_value, " ON", v->len_str);
@@ -147,8 +137,9 @@ static void test_wait_holds_while_purge_still_moving(void)
         "should stay in PurgeRetractWait while purge moves and timeout is not reached");
 }
 
-/* THE 4.30a CHANGE: timeout routes to the dedicated purge error state. */
-static void test_wait_timeout_routes_to_purge_error_state(void)
+/* The 20 s timeout goes to the dedicated PurgeRetractWaitErrorState, so a purge
+ * unit that never retracts is distinguishable from a generic timeout. */
+static void test_wait_timeout_routes_to_error_state(void)
 {
     State     = PurgeRetractWait;
     StateTime = purge_timeout();
@@ -157,48 +148,11 @@ static void test_wait_timeout_routes_to_purge_error_state(void)
     doevents();
 
     TEST_ASSERT_EQUAL_INT_MESSAGE(PurgeRetractWaitErrorState, State,
-        "20 s timeout should route to PurgeRetractWaitErrorState (110), not ErrorState (99)");
+        "20 s timeout should route to PurgeRetractWaitErrorState (110)");
 }
 
-/* ============================================================
- * PurgeRetractWaitErrorState (110) post-conditions
- * ============================================================ */
-
-static void test_purge_error_state_stops_head_and_pump_and_finishes(void)
-{
-    State     = PurgeRetractWaitErrorState;
-    StateTime = 1234;
-    set_on(&HeadOnOff);             /* head was ON */
-    set_on(&PumpOnOff);             /* pump was ON */
-
-    doevents();
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "PurgeRetractWaitErrorState should return to FinishState");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (int)HeadOnOff.value,
-        "PurgeRetractWaitErrorState should stop the head (value 1 == OFF)");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, (int)PumpOnOff.value,
-        "PurgeRetractWaitErrorState should stop the pump (value 1 == OFF)");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, StateTime,
-        "PurgeRetractWaitErrorState should clear StateTime");
-}
-
-/* The operator-visible half of the change: a distinct message, so a purge that
- * never retracted is not reported as a generic timeout. */
-static void test_purge_error_state_displays_purge_timeout(void)
-{
-    State     = PurgeRetractWaitErrorState;
-    StateTime = 1234;
-    can_tx_reset();
-
-    doevents();
-
-    TEST_ASSERT_EQUAL_STRING_MESSAGE("Warn:PURGE TIMEOUT", last_display_message(),
-        "PurgeRetractWaitErrorState should display its own message, "
-        "not ErrorState's \"Warn:TIMEOUT ERROR\"");
-}
-
-/* End-to-end: timeout, then the error state runs on the following pass. */
+/* End-to-end: timeout, then the purge error state runs on the following pass
+ * and reports the purge-specific message. */
 static void test_timeout_then_error_state_completes_in_two_passes(void)
 {
     State     = PurgeRetractWait;
@@ -209,17 +163,17 @@ static void test_timeout_then_error_state_completes_in_two_passes(void)
     TEST_ASSERT_EQUAL_INT_MESSAGE(PurgeRetractWaitErrorState, State,
         "first pass: timeout routes to PurgeRetractWaitErrorState");
 
+    can_tx_reset();
     doevents();
     TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
         "second pass: error state returns to FinishState");
+    TEST_ASSERT_EQUAL_STRING("Warn:PURGE TIMEOUT", last_display_message());
     TEST_ASSERT_EQUAL_INT(1, (int)HeadOnOff.value);
     TEST_ASSERT_EQUAL_INT(1, (int)PumpOnOff.value);
 }
 
 /* ============================================================
- * ErrorState (99) — same post-conditions, different message.
- * Passing this alongside the group above is what shows the new state is
- * behaviourally equivalent to the generic one it replaced.
+ * ErrorState (99) post-conditions
  * ============================================================ */
 
 static void test_generic_error_state_has_same_post_conditions(void)
@@ -285,9 +239,7 @@ int main(void)
     RUN_TEST(test_wait_success_advances_to_init_la_move);
     RUN_TEST(test_wait_success_resets_state_time);
     RUN_TEST(test_wait_holds_while_purge_still_moving);
-    RUN_TEST(test_wait_timeout_routes_to_purge_error_state);
-    RUN_TEST(test_purge_error_state_stops_head_and_pump_and_finishes);
-    RUN_TEST(test_purge_error_state_displays_purge_timeout);
+    RUN_TEST(test_wait_timeout_routes_to_error_state);
     RUN_TEST(test_timeout_then_error_state_completes_in_two_passes);
     RUN_TEST(test_generic_error_state_has_same_post_conditions);
     RUN_TEST(test_purge_retract_skips_wait_when_already_retracted);

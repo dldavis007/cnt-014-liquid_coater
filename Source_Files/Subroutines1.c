@@ -15,11 +15,12 @@
 #include "mcohw.h"
 #include "EEProm.h"
 #include "string.h"
-#include "Packets.h"
-#include "MenuSerialize.h"
+#include "pc_log.h"
 
 int SenseLevel;
 char Stop_flag=0;
+
+unsigned int activeCamAddress;
 
 extern char save_serial_flag;
 extern char Gen_Flags;
@@ -143,6 +144,7 @@ extern char HeadSpdOut;
 
 extern unsigned cam_add1;
 extern unsigned cam_add2;
+UNSIGNED16 paired_camera_address;
 
 extern unsigned ran_num;  //used to create unique camera address  
 
@@ -150,6 +152,18 @@ extern char CurrentLight;
 extern char lightval;
 
 extern CAN_MSG gTxMsg;
+
+/* HD trig handshake. Command bits arrive in gProcImg[OUT_digi_10], the 5-byte
+ * 0x521 command RPDO (user.c). The query carries NODE_ID so the camera knows
+ * which unit is asking; the answer echoes it back in the same position. */
+#define TRIG_REQUEST_BIT      0x02   /* gProcImg[OUT_digi_0] */
+#define CAM_QUERY_TRIG_MODE   0x10   /* 0x521 BUF[0] */
+#define CAM_CMD_TRIG_RESPONSE 0x16   /* gProcImg[OUT_digi_10] */
+#define CAM_TRIG_NODE         (OUT_digi_10 + 3)   /* NODE_ID byte of the answer */
+#define TRIG_QUERY_TIMEOUT_MS 5000
+
+bool trig_query_sent = false;
+UNSIGNED16 trig_query_timer = 0;
 
 extern char State;
 extern char Cycle_Complete;
@@ -350,13 +364,10 @@ Start by moving to next position (extend or retract, depending on odd_even_count
 	{   //If not Start and not Moving, initiate next movement
     	if ( StrokeNum >= SecondStrokes.value || StrokeNum >= 10 )
 		{   //If done with full cycles, turn off pump
-			//strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
-			//getvalue(&PumpOnOff,0);
-			update_menu_var_by_str(&PumpOnOff, "OFF");
-
-			//PumpSpd.value = OldPumpSpeed;
-			//getstrval( &PumpSpd );
-			update_menu_var_by_value(&PumpSpd, OldPumpSpeed);
+			strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
+			getvalue(&PumpOnOff,0);
+			PumpSpd.value = OldPumpSpeed;
+			getstrval( &PumpSpd );
 		    return 1;
 		}
     	Cntr = SecondStrokeCtr[StrokeNum].value;
@@ -372,10 +383,8 @@ Start by moving to next position (extend or retract, depending on odd_even_count
 				
 			if ( !FirstStrokes.value )
 			{
-				//strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-    			//getvalue(&PumpOnOff,0);
-				update_menu_var_by_str(&PumpOnOff, "ON");
-
+				strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+    			getvalue(&PumpOnOff,0);
     			Pos = Cntr + ( Len/2 );
 			    odd_even_counter = 0; //Start a zero if no First Strokes
 			}	
@@ -389,9 +398,8 @@ Start by moving to next position (extend or retract, depending on odd_even_count
 		    Pos = Cntr + ( Len/2 );
 		}
 		//Set Pump speed, LAPos for most strokes
-		//PumpSpd.value = PumpSpeed;
-		//getstrval( &PumpSpd );
-		update_menu_var_by_value(&PumpSpd, PumpSpeed);
+		PumpSpd.value = PumpSpeed;
+		getstrval( &PumpSpd );
 		//Send move command
 		MoveLA ( Pos, LASpeed, LACurrent );
 		MoveCmdXmtd = 1;
@@ -535,13 +543,10 @@ Start by going to retracted position and start pumps, then extend to extended po
 		{   //If done with Center cycles, turn off pump 
 			if  ( !SecondStrokes.value ) //See if there are Second Strokes
 			{   //If no Second Strokes, turn pump off
-			    //strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
-				//getvalue(&PumpOnOff,0);
-				update_menu_var_by_str(&PumpOnOff, "OFF");
-
-				//PumpSpd.value = OldPumpSpeed;
-				//getstrval( &PumpSpd );
-				update_menu_var_by_value(&PumpSpd, OldPumpSpeed);
+			    strncpy(PumpOnOff.str_value,"OFF",PumpOnOff.len_str);
+				getvalue(&PumpOnOff,0);
+				PumpSpd.value = OldPumpSpeed;
+				getstrval( &PumpSpd );
 			}
 		    return 1;
 		}
@@ -551,9 +556,8 @@ Start by going to retracted position and start pumps, then extend to extended po
 		PumpSpeed = FirstStrokePmpSpd[StrokeNum].value;
 	    if ( StrokeNum == 0  )//Start pump at start of first stroke
 		{
-			//strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-			//getvalue(&PumpOnOff,0);
-			update_menu_var_by_str(&PumpOnOff, "ON");
+			strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+			getvalue(&PumpOnOff,0);
 		    Pos = Cntr + ( Len/2 );//First stroke ends at far end
 		    odd_even_counter = 0;
 		}
@@ -566,9 +570,8 @@ Start by going to retracted position and start pumps, then extend to extended po
 		    Pos = Cntr + ( Len/2 );
 		}
 		//Set Pump speed
-		//PumpSpd.value = PumpSpeed;
-		//getstrval( &PumpSpd );
-		update_menu_var_by_value(&PumpSpd, PumpSpeed);
+		PumpSpd.value = PumpSpeed;
+		getstrval( &PumpSpd );
 		//Send move command
 		MoveLA ( Pos, LASpeed, LACurrent );
 		MoveCmdXmtd = 1;
@@ -584,6 +587,137 @@ Start by going to retracted position and start pumps, then extend to extended po
 
 
 
+// /* Reads internalExternal as a whole number. The menu edits .value as a float with
+//  * inc 1, so it should already be integral - the rounding keeps a future
+//  * fractional increment from silently failing every == compare. */
+char internalExternal ( void )
+{
+	return (char)( InternalExternalCameraSetting.value + 0.5 );
+}
+
+// /* Sends the 0x521 trig-mode query to the active camera and arms the response
+//  * window. TRIG_SENT, or TRIG_NOCAM if no camera has been addressed. */
+// TrigResult HDTrigQueryStart ( void )
+// {
+// 	if ( !activeCamAddress )				/* no camera addressed yet */
+// 		return TRIG_NOCAM;
+
+// 	gTxMsg.ID = 0x521;
+// 	gTxMsg.LEN = 4;
+// 	gTxMsg.BUF[0] = CAM_QUERY_TRIG_MODE;
+// 	gTxMsg.BUF[1] = activeCamAddress;
+// 	gTxMsg.BUF[2] = activeCamAddress >> 8;
+// 	gTxMsg.BUF[3] = NODE_ID;
+// 	if ( !MCOHW_PushMessage ( &gTxMsg ) )
+// 	{
+// 		// failed to transmit
+// 		MCOUSER_FatalError ( 0x8801 );
+// 	}
+
+// 	gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;	/* drop a stale answer */
+// 	trig_query_sent = true;
+// 	trig_query_timer = MCOHW_GetTime() + TRIG_QUERY_TIMEOUT_MS;
+// 	LOG_PRINTF(("Trig query sent to HD active camera, waiting for response..."));
+// 	return TRIG_SENT;
+// }
+
+// /* Resolves an armed trig query. TRIG_STARTED when the camera answers for this
+//  * node, TRIG_NOTIDLE if it answers while we are busy, TRIG_TIMEDOUT when the
+//  * window closes, TRIG_WAITING while it is still open, TRIG_IDLE if not armed. */
+// TrigResult HDTrigQueryService ( void )
+// {
+// 	if ( !trig_query_sent )
+// 		return TRIG_IDLE;
+
+// 	if ( ( gProcImg[OUT_digi_10] >= CAM_CMD_TRIG_RESPONSE ) &&
+// 	     gProcImg[OUT_digi_10 + 3] == NODE_ID )
+// 	{
+// 		gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;
+// 		trig_query_sent = false;
+// 		if ( State != FinishState || ghostState )
+// 			return TRIG_NOTIDLE;
+// 		State = TrigState;
+// 		LOG_PRINTF(("Trig query response received from HD active camera, starting coating sequence..."));
+// 		return TRIG_STARTED;
+// 	}
+
+// 	if ( MCOHW_IsTimeExpired ( trig_query_timer ) )
+// 	{
+// 		trig_query_sent = false;
+// 		LOG_PRINTF(("HD Trig query timed out"));
+// 		return TRIG_TIMEDOUT;
+// 	}
+
+// 	return TRIG_WAITING;
+// }
+
+/* Trig request: SD starts the coating sequence directly, HD first asks the
+ * active camera whether this unit owns the trigger. Returns what this pass
+ * did - the handshake outcome when one resolved, else the request's. */
+TrigResult TrigRequest ( void )
+{
+	char internalexternal = internalExternal();
+	TrigResult result = TRIG_NOCAM;
+
+	/* Resolve an answer already in flight FIRST: arming clears the response
+	 * bit, so a new request arriving on the same pass would otherwise discard
+	 * the answer we were waiting for. */
+	// result = HDTrigQueryService();
+
+	if ( gProcImg[OUT_digi_0] & TRIG_REQUEST_BIT )
+	{
+		gProcImg[OUT_digi_0] &= ~TRIG_REQUEST_BIT;
+		// Display ( "Proc:Triggered" );// Temp remove
+		/* A request landing on the pass that started the sequence is consumed
+		 * but cannot re-arm - we are no longer idle. */
+		if ( result != TRIG_STARTED )
+		{
+			if ( State != FinishState || ghostState ) 	// we don't trigger if State != FinishState (in middle of coating sequence) or ghostState (middle of purge sequence)
+				return TRIG_NOTIDLE;
+			else if ( internalexternal == EXTERNAL_CAMERA )	{				// we are HD, so we need to ask the camera if we own the trigger
+				// result = HDTrigQueryStart();
+				// if paired camera address is the one that's active AND if paired camera address has been set (0 is pre paired init state)
+				if (paired_camera_address == activeCamAddress && paired_camera_address != 0){
+					State = TrigState;
+					LOG_PRINTF(("[host] EXTERNAL PAIRED CAMERA ADDRESS: %04X IS ACTIVE CAMERA ADDRESS: %04X, triggering...\n", paired_camera_address, activeCamAddress));
+					return TRIG_STARTED;
+				}
+				else if (paired_camera_address == 0){
+					LOG_PRINTF(("[host] EXTERNAL PAIRED CAMERA ADDRESS: %04X IS 0 and NOT PAIRED, not triggering...\n", paired_camera_address));
+					Display("Warn:NO EXT CAM PAIRED");
+				}
+				else {
+					LOG_PRINTF(("[host] EXTERNAL PAIRED CAMERA ADDRESS: %04X IS NOT ACTIVE CAMERA ADDRESS: %04X, not triggering...\n", paired_camera_address, activeCamAddress));
+					Display("Warn:WRONG EXT CAM");
+				}
+				
+				
+				return TRIG_IDLE;
+				
+			}
+			else if ( internalexternal != INTERNAL_CAMERA )     // this shouldn't ever happen (hdsd enum is range 1-2) but this is an edge case
+				return TRIG_IDLE;			/* mode has no trig path */
+			else if ( VSEL_PORT & CAM_ON && (internalexternal == INTERNAL_CAMERA)) // if we are SD and the camera is on, we can start the sequence
+			{
+				State = TrigState;
+				LOG_PRINTF(("[host] INTERNAL CAMERA(s) ACTIVE, triggering..\n"));
+
+			
+				return TRIG_STARTED;
+			}
+			else {
+				LOG_PRINTF(("[host] INTERNAL CAMERA(s) NOT ACTIVE, not triggering..\n"));
+				Display("Warn:WRONG INT CAMERA");
+				return TRIG_IDLE;
+			}
+			
+		}
+	}
+
+	return result;
+}
+
+
 extern char *RamAddress;
 extern char RamData;
 extern char RamCkSum;
@@ -593,7 +727,6 @@ void doevents ( void )
     int i,j;
 		
 	   //if the 2-Wire system is working, start updating the 2-Wire Stack
-		send_serialized_menu(); // Send the serialized menu if ctx.status is not SERIALIZE_IDLE or SERLIALIZE_COMPLETE
 
 
 		if ( Store_Flag && State == FinishState) //To prevent timeout while exiting menu after changing settings during sequence -EBB
@@ -602,188 +735,173 @@ void doevents ( void )
             Save_Variables();
         }
 	   	  
-		if ( ( TC0_RCVD_Data & TeleData_CamTog1 ) && CursorDownFlag == 0 )
-		{
-			CursorDownFlag = 1;
-		}
-		else if ( CursorDownFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog1 ) ){
-			CursorDownFlag = 0;
-		}
-
-		
-		if ( ( TC0_RCVD_Data &  TeleData_CamTog2 ) && CursorUpFlag == 0 ){
-			CursorUpFlag = 1;
-		}
-			
-		else if ( CursorUpFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog2 ) ){
-			CursorUpFlag = 0;
-		}
+		    if ( ( TC0_RCVD_Data & TeleData_CamTog1 ) && CursorDownFlag == 0 )
+                CursorDownFlag = 1;
+            else if ( CursorDownFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog1 ) )
+                CursorDownFlag = 0;
+            
+            if ( ( TC0_RCVD_Data &  TeleData_CamTog2 ) && CursorUpFlag == 0 )
+                CursorUpFlag = 1;
+            else if ( CursorUpFlag == -1 && !( TC0_RCVD_Data & TeleData_CamTog2 ) )
+                CursorUpFlag = 0;
+            
+            if ( ( TC0_RCVD_Data & TeleData_PLCTrig ) && SelectFlag == 0 )
+                SelectFlag = 1;
+            else if ( SelectFlag == -1 && !( TC0_RCVD_Data & TeleData_PLCTrig ) )
+                SelectFlag = 0;
 			
 		
-		if ( ( TC0_RCVD_Data & TeleData_PLCTrig ) && SelectFlag == 0 ){
-			SelectFlag = 1;
-		}
-			
-		else if ( SelectFlag == -1 && !( TC0_RCVD_Data & TeleData_PLCTrig ) ){
-			SelectFlag = 0;	
-		}
-                
-		
-		if( MachineSize.value == 2 ) //24
-			gProcImg[IN_digi_22] = 0b00100101;  //Heater 1 (xxxxxx01) & 2 (xxxx01xx) = RTD 1,  Heater 3 (xx10xxxx) = RTD 2, RTD 3 not used
-		else
-			gProcImg[IN_digi_22] = 0b00011001;  //Heater 1 (xxxxxx01) & 3 (xx01xxxx) = RTD 1, Heater 2 (xxxx10xx) = RTD 2,  RTD 3 (not used)  
-		
-		gProcImg[IN_digi_15] = ((HtrBaseSetPnt.value)-32)*5/9;		 //Heater 1 = Base Set Point
-		if( HtrBaseOnOff.value == 1 )//off 
-			gProcImg[IN_digi_15] = 0;
+		   if( MachineSize.value == 2 ) //24
+	          gProcImg[IN_digi_22] = 0b00100101;  //Heater 1 (xxxxxx01) & 2 (xxxx01xx) = RTD 1,  Heater 3 (xx10xxxx) = RTD 2, RTD 3 not used
+		   else
+	          gProcImg[IN_digi_22] = 0b00011001;  //Heater 1 (xxxxxx01) & 3 (xx01xxxx) = RTD 1, Heater 2 (xxxx10xx) = RTD 2,  RTD 3 (not used)  
+		   
+           gProcImg[IN_digi_15] = ((HtrBaseSetPnt.value)-32)*5/9;		 //Heater 1 = Base Set Point
+           if( HtrBaseOnOff.value == 1 )//off 
+		   	  gProcImg[IN_digi_15] = 0;
 
-		gProcImg[IN_digi_16] = ((HtrISOSetPnt.value)-32)*5/9;    	 //Heater 2 = ISO Set Point
-		if ( HtrISOOnOff.value == 1 ) //off 
-			gProcImg[IN_digi_16] = 0;   
+           gProcImg[IN_digi_16] = ((HtrISOSetPnt.value)-32)*5/9;    	 //Heater 2 = ISO Set Point
+           if ( HtrISOOnOff.value == 1 ) //off 
+		   	  gProcImg[IN_digi_16] = 0;   
 
-		gProcImg[IN_digi_17] = ((32)-32)*5/9;   	 
-		if ( 1 ) gProcImg[IN_digi_17] = 0;	 			   		 //Heater 3 = Not Used 
+           gProcImg[IN_digi_17] = ((32)-32)*5/9;   	 
+           if ( 1 ) gProcImg[IN_digi_17] = 0;	 			   		 //Heater 3 = Not Used 
 
-		gProcImg[IN_digi_19] = PGainBase.value;			   	 	 //Heater 1 PID values (Base)
-		gProcImg[IN_digi_20] = (char)(IGainBase.value)*100+1;
-		gProcImg[IN_digi_21] = (IMaxBase.value / 100);     // originally 10-50 (instead of 1000-5000) because of 10to50function 
+           gProcImg[IN_digi_19] = PGainBase.value;			   	 	 //Heater 1 PID values (Base)
+           gProcImg[IN_digi_20] = (char)(IGainBase.value)*100+1;
+           gProcImg[IN_digi_21] = (IMaxBase.value);
 
-		gProcImg[IN_digi_23] = PGainISO.value;			   		 //Heater 2 PID values (ISO)
-		gProcImg[IN_digi_24] = (char)(IGainISO.value)*100+1;
-		gProcImg[IN_digi_25] = (IMaxISO.value / 100); 	     // originally 10-50 (instead of 1000-5000) because of 10to50function
+           gProcImg[IN_digi_23] = PGainISO.value;			   		 //Heater 2 PID values (ISO)
+           gProcImg[IN_digi_24] = (char)(IGainISO.value)*100+1;
+           gProcImg[IN_digi_25] = IMaxISO.value;
 
-		gProcImg[IN_digi_27] = (10);			   		 	 //Heater 3 PID values 
-		gProcImg[IN_digi_28] = (char)(0.03)*100+1;
-		gProcImg[IN_digi_29] = (20);
+           gProcImg[IN_digi_27] = (10);			   		 	 //Heater 3 PID values 
+           gProcImg[IN_digi_28] = (char)(0.03)*100+1;
+           gProcImg[IN_digi_29] = (20);
 
 
 		   	   
-		if ( TC0_RCVD_Data != ( gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1] ) )
-		{
-			TC0_RCVD_Data = gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1];
-			if ( MenuTimer < MenuTime )   
-				MenuTimer = 0;
-		}
-		if ( gProcImg[OUT_digi_0] & 0x01 && !(Gen_Flags & Gen_Flags_Menu_Active) )
-		{
-			Timer1 = RTI_One_Sec * .10;
-			while ( Timer1 );
-			gProcImg[IN_digi_0] |= 0x01;
-			
-			i = MCO_ProcessStack_Menu();
-			Timer1 = RTI_One_Sec * .10;
-			while ( Timer1 );
-			
-			gProcImg[OUT_digi_0] &= ~0x01;
-			
-			StackPointer = 0;
-			MenuStackc[StackPointer].Index[0] = 0;
-			MenuStackc[StackPointer].Index[1] = 0;
-			MenuStackc[StackPointer].Index[2] = 0;
-			MenuStackc[StackPointer].Index[3] = 0;
-			MenuStackc[StackPointer].CursorPos = 1;
-			MenuStackc[StackPointer].FirstLine = 0;
-			Gen_Flags |= Gen_Flags_Menu_Active;
-			
-			LoadMenu ( MenuStackc[StackPointer].Index );
-			InsertCursor ();
-			DisplayTitler ();			
-			TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
-			CursorDownFlag = 0;
-			CursorUpFlag = 0;
-			SelectFlag = 0;
+            if ( TC0_RCVD_Data != ( gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1] ) )
+            {
+                TC0_RCVD_Data = gProcImg[OUT_digi_2]<<8 | gProcImg[OUT_digi_1];
+                if ( MenuTimer < MenuTime )   
+                   MenuTimer = 0;
+            }
+            if ( gProcImg[OUT_digi_0] & 0x01 && !(Gen_Flags & Gen_Flags_Menu_Active) )
+            {
+            	Timer1 = RTI_One_Sec * .10;
+            	while ( Timer1 );
+                gProcImg[IN_digi_0] |= 0x01;
+				
+				i = MCO_ProcessStack();
+            	Timer1 = RTI_One_Sec * .10;
+            	while ( Timer1 );
+                
+                gProcImg[OUT_digi_0] &= ~0x01;
+				
+				StackPointer = 0;
+                MenuStackc[StackPointer].Index[0] = 0;
+                MenuStackc[StackPointer].Index[1] = 0;
+                MenuStackc[StackPointer].Index[2] = 0;
+                MenuStackc[StackPointer].Index[3] = 0;
+                MenuStackc[StackPointer].CursorPos = 1;
+                MenuStackc[StackPointer].FirstLine = 0;
+                Gen_Flags |= Gen_Flags_Menu_Active;
+                
+                LoadMenu ( MenuStackc[StackPointer].Index );
+                InsertCursor ();
+                DisplayTitler ();			
+                TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
+    			CursorDownFlag = 0;
+    			CursorUpFlag = 0;
+    			SelectFlag = 0;
 
-			//gProcImg[IN_digi_0] |= 0x01;
-		}
+				//gProcImg[IN_digi_0] |= 0x01;
+            }
 
            
             
-		if ( !MenuTimer )
-		{
-			MenuTimer = MenuTime;
-			
-			if ( Gen_Flags & Gen_Flags_Menu_Active )
-			{
-				//Limit the Center and Length setting according to MaxLADist and to each other
-					//Length has to be less than 2 times the center, etc...
-					int i;
-					//Check coating lengths while menu is active
-					for (i=0;i<10;i++)
+	       if ( !MenuTimer )
+		   {
+			   MenuTimer = MenuTime;
+			   
+	   	   	   if ( Gen_Flags & Gen_Flags_Menu_Active )
+			   {
+        			//Limit the Center and Length setting according to MaxLADist and to each other
+			         //Length has to be less than 2 times the center, etc...
+					 int i;
+			    	 //Check coating lengths while menu is active
+			    	 for (i=0;i<10;i++)
+					 {
+				 	    CkCntrLength(FirstStrokeLen+i);
+						CkCntrLength(SecondStrokeLen+i);
+					 }
+					
+					if ( CursorDownFlag )
 					{
-					CkCntrLength(FirstStrokeLen+i);
-					CkCntrLength(SecondStrokeLen+i);
+           				CursorDown ();
+						CursorDownFlag = -1;
 					}
+    				if ( CursorUpFlag )
+					{
+           				CursorUp ();
+						CursorUpFlag = -1;
+					}					
 				
-				if ( CursorDownFlag )
-				{
-					CursorDown ();
-					CursorDownFlag = -1;
-				}
-				if ( CursorUpFlag )
-				{
-					CursorUp ();
-					CursorUpFlag = -1;
-				}					
+           			if ( SelectFlag )
+					{
+   					    MenuTimer = MenuTime * 2; //briefly disable select after menu is selected
+           				Select ();          //select menu item at cursor position
+						SelectFlag = -1;
+					}					 
+					
+				    {
+        			    char tempstr[4];
+        			    sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_0] )  *  9 / 5 + 32 ) );
+        				if ( atoi( tempstr ) != ( HtrBaseTemp.value ) )
+						{
+        				    
+                            
+							if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
+        					     MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
+								 strcmp ( HtrBaseTemp.str_value, tempstr) && !HeaterTimer )
+						    {
+									 UpdateMenu = 1;
+        							 HtrBaseTemp.value = atoi(tempstr);
+									 strcpy ( HtrBaseTemp.str_value, tempstr);
+							}
+						}
+        			    sprintf (tempstr, "%3.0f", ( (float)( gProcImg[OUT_ana_1] ) *  9 / 5 + 32 ) );
+        				if ( atoi( tempstr ) != ( HtrISOTemp.value ) )
+        				{
+							
+                            if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
+        					     MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
+								 strcmp ( HtrISOTemp.str_value, tempstr) && !HeaterTimer )
+							{
+        				    	     UpdateMenu = 1;
+        							 HtrISOTemp.value = atoi(tempstr);
+									 strcpy ( HtrISOTemp.str_value, tempstr);
+							}
+						}
+        			    sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_2] ) *  9 / 5 + 32 ) );
+        			}
+				   				   			   
+				    if ( UpdateMenu )
+				    {
+                       LoadMenu ( MenuStackc[StackPointer].Index );
+                       if ( !Variable_flag )
+					       InsertCursor ();
+                       DisplayTitler ();
+					   UpdateMenu = 0;
+				    }
+				}			   
+		    }		
 			
-				if ( SelectFlag )
-				{
-					MenuTimer = MenuTime * 2; //briefly disable select after menu is selected
-					Select ();          //select menu item at cursor position
-					SelectFlag = -1;
-				}					 
-				
-				{
-					char tempstr[4];
-					sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_0] )  *  9 / 5 + 32 ) );
-					if ( atoi( tempstr ) != ( HtrBaseTemp.value ) )
-					{
-						
-						
-						if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
-								MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
-								strcmp ( HtrBaseTemp.str_value, tempstr) && !HeaterTimer )
-						{
-									UpdateMenu = 1;
-									//HtrBaseTemp.value = atoi(tempstr);
-									//strcpy ( HtrBaseTemp.str_value, tempstr);
-									update_menu_var_by_str(&HtrBaseTemp, tempstr);
-
-						}
-					}
-					sprintf (tempstr, "%3.0f", ( (float)( gProcImg[OUT_ana_1] ) *  9 / 5 + 32 ) );
-					if ( atoi( tempstr ) != ( HtrISOTemp.value ) )
-					{
-						
-						if ( MenuStackc[StackPointer].Index[0] == 0 && MenuStackc[StackPointer].Index[1] == 0 && 
-								MenuStackc[StackPointer].Index[2] == 0 && MenuStackc[StackPointer].Index[3] == 4 &&
-								strcmp ( HtrISOTemp.str_value, tempstr) && !HeaterTimer )
-						{
-									UpdateMenu = 1;
-									//HtrISOTemp.value = atoi(tempstr);
-									//strcpy ( HtrISOTemp.str_value, tempstr);
-									update_menu_var_by_str(&HtrISOTemp, tempstr);
-
-						}
-					}
-					sprintf (tempstr, "%3.0f", ( (float) ( gProcImg[OUT_ana_2] ) *  9 / 5 + 32 ) );
-				}
-											
-				if ( UpdateMenu )
-				{
-					LoadMenu ( MenuStackc[StackPointer].Index );
-					if ( !Variable_flag )
-						InsertCursor ();
-					DisplayTitler ();
-					UpdateMenu = 0;
-				}
-			}			   
-		}		
-		
-		if ( ( MachineSize.value ) == 2 ) //24
-				RDR_Ratio = RDR24;
-		else
-				RDR_Ratio = RDR12;
+			if ( ( MachineSize.value ) == 2 ) //24
+			 	 RDR_Ratio = RDR24;
+	   		else
+			     RDR_Ratio = RDR12;
 			
 
 			//Time Calculation for dt in cam PID loop
@@ -805,41 +923,41 @@ void doevents ( void )
 
 			
 
-		if(CamPIDTimer < PrevCamPIDTime){ // Fix wraparound for PID Timer
-			CamPIDTimer = 65535 - PrevCamPIDTime;
-			PrevCamPIDTime = 0;
-		}
+			if(CamPIDTimer < PrevCamPIDTime){ // Fix wraparound for PID Timer
+				CamPIDTimer = 65535 - PrevCamPIDTime;
+				PrevCamPIDTime = 0;
+			}
 			
 
-		inspect_cam_PID.dT = (CamPIDTimer - PrevCamPIDTime)/RTI_One_Sec; // Calculate dT for inspect_cam
+			inspect_cam_PID.dT = (CamPIDTimer - PrevCamPIDTime)/RTI_One_Sec; // Calculate dT for inspect_cam
 
 
-		if(inspect_cam_PID.dT >= min_dt){ // Make sure enough time has passed so that the loops arent insanely short
-			
-			PrevCamPIDTime = CamPIDTimer;
-			Cam_speed = GetRotationalSpeed(CamPosition,PrevCamPos,inspect_cam_PID.dT); 
-			PrevCamPos = CamPosition;
+			if(inspect_cam_PID.dT >= min_dt){ // Make sure enough time has passed so that the loops arent insanely short
+				
+				PrevCamPIDTime = CamPIDTimer;
+				Cam_speed = GetRotationalSpeed(CamPosition,PrevCamPos,inspect_cam_PID.dT); 
+				PrevCamPos = CamPosition;
 
-			if ((fabs(Cam_speed) < 0.1) && (CurrentCamPWM > 0) && (inspect_cam_PID.desired_value < 1)){
-				CurrentCamPWM = 0; // If PWM is low and speed is desired to be 0 then set PWM to 0
+ 				if ((fabs(Cam_speed) < 0.1) && (CurrentCamPWM > 0) && (inspect_cam_PID.desired_value < 1)){
+					CurrentCamPWM = 0; // If PWM is low and speed is desired to be 0 then set PWM to 0
+
+				}
+				else{//business as usual
+
+					inspectPIDChange = (int)((PID_Loop(&inspect_cam_PID,Cam_speed)));
+
+					if(CurrentCamPWM + inspectPIDChange > 100){ //Cap PWM at 100.
+						CurrentCamPWM = 100;
+					}
+					else if(CurrentCamPWM + inspectPIDChange <= 0){ // Limit PWM at 0.
+						CurrentCamPWM = 0;
+					}
+					else{ // Add PID change like normal
+						CurrentCamPWM = CurrentCamPWM + (char)inspectPIDChange; 
+					}
+				}
 
 			}
-			else{//business as usual
-
-				inspectPIDChange = (int)((PID_Loop(&inspect_cam_PID,Cam_speed)));
-
-				if(CurrentCamPWM + inspectPIDChange > 100){ //Cap PWM at 100.
-					CurrentCamPWM = 100;
-				}
-				else if(CurrentCamPWM + inspectPIDChange <= 0){ // Limit PWM at 0.
-					CurrentCamPWM = 0;
-				}
-				else{ // Add PID change like normal
-					CurrentCamPWM = CurrentCamPWM + (char)inspectPIDChange; 
-				}
-			}
-
-		}
 
 
 			
@@ -1191,19 +1309,14 @@ void doevents ( void )
               BlowerOn ();
             }
 
+			update_active_cam_address();
 			CameraMain1 ();
 			CameraMain2 ();
+			clear_camera_commands();	// must follow both CameraMains
+			poll_paired_camera_address();
 			
-            if ( gProcImg[OUT_digi_0] & 0x02 )
-			{
-			    if ( VSEL_PORT & CAM_ON )
-                {
-			        if ( State == FinishState && !ghostState )
-				        State = TrigState;
-				}
-                gProcImg[OUT_digi_0] &=  ~0x02;				
-            }			
-			
+			TrigRequest ();
+
 			if ( 1 ) // LA home etc.
 			{
 			    Cycle_Complete = 1;
@@ -1217,9 +1330,8 @@ void doevents ( void )
 					HeadSpeed = 0;
 				    Cycle_Complete = 0;
                     Display ( "Proc:Coating" );
-    				//strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,2);
-					update_menu_var_by_str(&HeadOnOff, "ON");
+    				strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,2);
 
                 	gTxMsg.ID = 0x361; 		 //make sure purge unit (ghostcup) is retracted
 	        		gTxMsg.LEN = 1;
@@ -1357,13 +1469,10 @@ void doevents ( void )
 					if (RetractTime.value)
 					{
 					   OldPumpSpeed = PumpSpd.value;
-					   //PumpSpd.value = 75;
-					  // getstrval( &PumpSpd );
-					update_menu_var_by_value(&PumpSpd, 75.0);
-
-					   //strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-					  // getvalue(&PumpOnOff,0);
-					   update_menu_var_by_str(&PumpOnOff, " ON");
+					   PumpSpd.value = 75;
+					   getstrval( &PumpSpd );
+					   strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+					   getvalue(&PumpOnOff,0);
 					   
 					}
 					
@@ -1371,8 +1480,7 @@ void doevents ( void )
 					{
     					CleanCoatSeq ( 1 );
     			    	StateTime = 0;
-                        //PumpOnOff.value = 1;
-						update_menu_var_by_str(&PumpOnOff, "OFF");						
+                        PumpOnOff.value = 1;						
     			    	State++;
 					}
 				break;
@@ -1390,11 +1498,9 @@ void doevents ( void )
 				break;
 				
 				case HomeState:
-    				//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,1);
-					//HeadOnOff.value = 1;
-
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 					
 					if ( !gProcImg[OUT_digi_7] )//skip if moving
 					{
@@ -1455,13 +1561,12 @@ void doevents ( void )
                     Display ( "Warn:TIMEOUT ERROR" );
 					Update_Menu_Timer = 5 * RTI_One_Sec;
 
-    				//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,1);
-					//HeadOnOff.value = 1;
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 
-                    //PumpOnOff.value = 1;
-					update_menu_var_by_str(&PumpOnOff, "OFF");
+                    PumpOnOff.value = 1;
+
 					State = FinishState;
 				break;
 				
@@ -1470,13 +1575,11 @@ void doevents ( void )
                     Display ( "Warn:HEAD ERROR" );
 					Update_Menu_Timer = 5 * RTI_One_Sec;
 
-    				//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-					//getvalue (&HeadOnOff,1);
-					//HeadOnOff.value = 1;
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 
-                    //PumpOnOff.value = 1;
-					update_menu_var_by_str(&PumpOnOff, "OFF");
+                    PumpOnOff.value = 1;
 
 					State++;
 				break;
@@ -1507,14 +1610,14 @@ void doevents ( void )
 
 				case PurgeRetractWaitErrorState:
 				    StateTime = 0;
-					// TODO change display message, maybe something like PURGE EXT ERR to indicate that
-					// the software thinks the purge unit is still extended
                     Display ( "Warn:PURGE TIMEOUT" );
 					Update_Menu_Timer = 5 * RTI_One_Sec;
 
-					update_menu_var_by_str(&HeadOnOff, "OFF");
+    				strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+					getvalue (&HeadOnOff,1);
+					HeadOnOff.value = 1;
 
-					update_menu_var_by_str(&PumpOnOff, "OFF");
+                    PumpOnOff.value = 1;
 
 					State = FinishState;
 				break;
@@ -1528,81 +1631,143 @@ void doevents ( void )
 			throwGhost();		//call sequence to throw ghost band
 
        		// Operate on CANopen protocol stack
-       		i = MCO_ProcessStack_Menu();
+       		i = MCO_ProcessStack();
 	   		//End MicroCanOpen Stack   
 	   
 
+}
+
+// must go before cameramain1 and cameramain2 because those functions zero out OUT_digi_8 and OUT_digi_9
+int update_active_cam_address(void){
+
+	UNSIGNED16 addr;
+	// zero guard
+	if ( !(gProcImg[OUT_digi_8]) && !(gProcImg[OUT_digi_9])){
+		return 0;
+	}
+
+	addr = ( gProcImg[OUT_digi_9] << 8 ) + gProcImg[OUT_digi_8];
+
+	/* another unit's camera */
+    // if ( addr != cam_add1 && addr != cam_add2 ){
+    //     return 0;                       
+	// }
+	// if already updated
+    if ( addr == activeCamAddress ){
+        return 0;
+	}
+	
+	activeCamAddress = addr;
+    LOG_PRINTF(( "New Active Camera Address: %04X\n", activeCamAddress ));
+    return 1;
+}
+
+int poll_paired_camera_address(void){
+
+	// read polled spot in gProc for 321 rpdo
+	UNSIGNED16 received_camera_address = gProcImg[OUT_digi_17] + (gProcImg[OUT_digi_18] << 8);
+	UNSIGNED8 received_paired_triggerable_unit = gProcImg[OUT_digi_16];
+
+	// TODO: single slot, polled once per pass - a second 321 before the next
+	// poll overwrites the first (watch busy-wait loops, e.g. find cameras)
+
+	// 0 = no new 321 since last poll
+    if (received_camera_address == 0){
+		return 0;
+	}
+    memset(&gProcImg[OUT_digi_16], 0, 8);   // consume every 321
+
+	// if the paired message IS for our node id, then pair it
+	if (received_paired_triggerable_unit == NODE_ID){
+		// ignore if we've already set it
+		if (paired_camera_address == received_camera_address){
+			return 0;
+		}
+		paired_camera_address = received_camera_address;
+		LOG_PRINTF(("[host] NEW PAIRED CAMERA ADDRESS: %04X\n", paired_camera_address));
+		return 1;
+	}
+
+	// if the received_camera_address matches the last paired_camera_address BUT the NODE_ID doesn't, it means that camera has been paired to a new unit
+	if (received_camera_address == paired_camera_address){
+		paired_camera_address = 0;
+		LOG_PRINTF(("[host] PAIRED CAMERA %04X MOVED TO UNIT %02X, unpaired\n", received_camera_address, received_paired_triggerable_unit));
+		return 1;
+	}
+
+	// idle case
+	return 0;
 }
 
 
 void CameraMain1 ( void )
 {
   int i;
-	char tempstr[12];
+  static UNSIGNED16 addr_tx_time;
+  static char addr_tx_pending = 0;
+
 	//light value is set in settings menu 0 - 100% duty
     //PWMDTY1 = atoi ( LightLevel1 ) * atoi (LightLevel1);
 
     ++ran_num;      //random number used for camera address
 
-        sprintf(tempstr, "%04X", cam_add1);
+	// TODO only update if this value has changed, instead of sprintf call everytime
 
-        // ensure null termination
-        tempstr[sizeof(tempstr)-1] = '\0'; 
+	sprintf ( disp_add1.str_value, "%04X", cam_add1 );    //for video diplay of camera address
 
-        // Update the value member of the variable in the python GUI
-        update_menu_var_by_str(&disp_add1, tempstr); 
-
-        if ( (gProcImg[OUT_digi_10] & 0x08) &&              //command to activate menu
-            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
-                (gProcImg[OUT_digi_12]<< 8 ==  (cam_add1 & 0xFF00)) &&
-                 !(Gen_Flags & Gen_Flags_Menu_Active) )
-        {
-            gProcImg[OUT_digi_10] = 0x00;
-            gProcImg[OUT_digi_11] = 0x00;
-            gProcImg[OUT_digi_12] = 0x00;
-            gProcImg[OUT_digi_8] = (cam_add1 & 0x00FF);
-	        gProcImg[OUT_digi_9] = (cam_add1 & 0xFF00)>>8;
-            VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
-			VideoSw_Port |= VideoSw;	 //Select Camera 1
-            
-            //turn off other cameras
-			gTxMsg.ID = 0x421;
-            gTxMsg.LEN = 2; 
-            gTxMsg.BUF[0] = cam_add1;
-            gTxMsg.BUF[1] = cam_add1 >> 8;      
-            if (!MCOHW_PushMessage(&gTxMsg))
-            {
-            // failed to transmit
-            MCOUSER_FatalError(0x8801);
-            }
-            //! Transmit this without using the TPDO
-            
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            gProcImg[IN_digi_0] |= 0x01;
-            i = MCO_ProcessStack_Menu();
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            
-            MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
-            
-            StackPointer = 0;
-            MenuStackc[StackPointer].Index[0] = 0;
-            MenuStackc[StackPointer].Index[1] = 0;
-            MenuStackc[StackPointer].Index[2] = 5;
-            MenuStackc[StackPointer].Index[3] = 1;
-            MenuStackc[StackPointer].CursorPos = 1;
-            MenuStackc[StackPointer].FirstLine = 0;
-            Gen_Flags |= Gen_Flags_Menu_Active;
-            
-			TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
-			CursorDownFlag = 0;
-			CursorUpFlag = 0;
-			SelectFlag = 0;
-			LoadMenu ( MenuStackc[StackPointer].Index );
-            InsertCursor ();
-            DisplayTitler ();
-        }
+	// returns early if camera not enabled
+	if (Cam1Enable.value == 2){ // 2 == 'DISABLED', 1 == ' ENABLED'
+		return;
+	}
+        
+	if ( (gProcImg[OUT_digi_10] == 0x08) &&              //command to activate menu
+		(gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
+			(gProcImg[OUT_digi_12]<< 8 ==  (cam_add1 & 0xFF00)) &&
+				!(Gen_Flags & Gen_Flags_Menu_Active) )
+	{
+		gProcImg[OUT_digi_8] = (cam_add1 & 0x00FF);
+		gProcImg[OUT_digi_9] = (cam_add1 & 0xFF00)>>8;
+		VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
+		VideoSw_Port |= VideoSw;	 //Select Camera 1
+		
+		//turn off other cameras
+		gTxMsg.ID = 0x421;
+		gTxMsg.LEN = 2; 
+		gTxMsg.BUF[0] = cam_add1;
+		gTxMsg.BUF[1] = cam_add1 >> 8;      
+		if (!MCOHW_PushMessage(&gTxMsg))
+		{
+		// failed to transmit
+		MCOUSER_FatalError(0x8801);
+		}
+		//! Transmit this without using the TPDO
+		
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		gProcImg[IN_digi_0] |= 0x01;
+		i = MCO_ProcessStack();
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		
+		MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
+		
+		StackPointer = 0;
+		MenuStackc[StackPointer].Index[0] = 0;
+		MenuStackc[StackPointer].Index[1] = 0;
+		MenuStackc[StackPointer].Index[2] = 5;
+		MenuStackc[StackPointer].Index[3] = 1;
+		MenuStackc[StackPointer].CursorPos = 1;
+		MenuStackc[StackPointer].FirstLine = 0;
+		Gen_Flags |= Gen_Flags_Menu_Active;
+		
+		TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
+		CursorDownFlag = 0;
+		CursorUpFlag = 0;
+		SelectFlag = 0;
+		LoadMenu ( MenuStackc[StackPointer].Index );
+		InsertCursor ();
+		DisplayTitler ();
+	}
 
 
     if ( gProcImg[OUT_digi_8] == (cam_add1 & 0x00FF) &&
@@ -1623,7 +1788,7 @@ void CameraMain1 ( void )
     	VSEL_PORT &= ~CAM_ON;       //turn camera off, portA bit 0 low
     }
 
-    if ( gProcImg[OUT_digi_10] & 0x01 )   //command to generate random address
+    if ( gProcImg[OUT_digi_10] == 0x01 )   //command to generate random address
     {
         srand(ran_num);               //seed the random number      
         cam_add1 = rand();
@@ -1633,16 +1798,32 @@ void CameraMain1 ( void )
     }
 
     //command to transmit address
-    if ( gProcImg[OUT_digi_10] & 0x02)   //called by scan_camera in 2-wire
+    if ( gProcImg[OUT_digi_10] == 0x02)   //called by scan_camera in 2-wire
     {
         //make delay proportional to camera address so cameras report in ascending order
-		Timer1 = cam_add1/100;
-		while(Timer1);
-        
+        addr_tx_time = MCOHW_GetTime() + cam_add1/100;
+        addr_tx_pending = 1;
+    }
+
+     if ( (gProcImg[OUT_digi_10] == 0x04) &&              //command to store address
+            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
+                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add1 & 0xFF00)) ) //msb - old address
+    {   //change to new address
+        cam_add1 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
+        //send new address
+        cam_addx1[0] = cam_add1;
+        cam_addx1[1] = cam_add1>>8;
+        Save_Camera_Add1();
+   }
+
+    //delayed 0x02 reply, sent without blocking the main loop
+    if ( addr_tx_pending && MCOHW_IsTimeExpired(addr_tx_time) )
+    {
+        addr_tx_pending = 0;
         gTxMsg.ID = 0x2a1;
-        gTxMsg.LEN = 2; 
+        gTxMsg.LEN = 3;
         gTxMsg.BUF[0] = cam_add1;
-        gTxMsg.BUF[1] = cam_add1 >> 8;      
+        gTxMsg.BUF[1] = cam_add1 >> 8;
         if (!MCOHW_PushMessage(&gTxMsg))
         {
             // failed to transmit
@@ -1651,91 +1832,77 @@ void CameraMain1 ( void )
          //! Transmit this without using the TPDO
     }
 
-     if ( (gProcImg[OUT_digi_10] & 0x04) &&              //command to store address 
-            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
-                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add1 & 0xFF00)) ) //msb - old address
-    {   //change to new address
-        cam_add1 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
-        //send new address            
-        cam_addx1[0] = cam_add1;     
-        cam_addx1[1] = cam_add1>>8;
-        Save_Camera_Add1();
-   }
-
 }
 
 
 void CameraMain2 ( void )
 {
     int i;
-	char tempstr[12];
+    static UNSIGNED16 addr_tx_time;
+    static char addr_tx_pending = 0;
+
 	//light value is set in settings menu 0 - 100% duty
     //PWMDTY1 = atoi ( LightLevel2 ) * atoi (LightLevel2);
 
     ++ran_num;      //random number used for camera address
+	
+	// TODO only update if this value has changed, instead of sprintf call everytime
 
-	   // sprintf ( disp_add2.str_value, "%04X", cam_add2 );    //for video diplay of camera address
-        
-	   	    //for video diplay of camera address
-        sprintf(tempstr, "%04X", cam_add2);
+	sprintf ( disp_add2.str_value, "%04X", cam_add2 );    //for video diplay of camera address
 
-        // ensure null termination
-        tempstr[sizeof(tempstr)-1] = '\0'; 
-
-        // Update the value member of the variable in the python GUI
-        update_menu_var_by_str(&disp_add2, tempstr); 
-
-        if ( (gProcImg[OUT_digi_10] & 0x08) &&              //command to activate menu
-            (gProcImg[OUT_digi_11] == (cam_add2 & 0x00FF)) &&         //lsb - old address
-                (gProcImg[OUT_digi_12]<< 8 ==  (cam_add2 & 0xFF00)) &&
-                 !(Gen_Flags & Gen_Flags_Menu_Active) )
-        {
-            gProcImg[OUT_digi_10] = 0x00;
-            gProcImg[OUT_digi_11] = 0x00;
-            gProcImg[OUT_digi_12] = 0x00;
-            gProcImg[OUT_digi_8] = (cam_add2 & 0x00FF);
-	        gProcImg[OUT_digi_9] = (cam_add2 & 0xFF00)>>8;
-            VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
-			VideoSw_Port |= VideoSw;	 //Select Camera 1
-            
-            //turn off other cameras
-			gTxMsg.ID = 0x421;
-            gTxMsg.LEN = 2; 
-            gTxMsg.BUF[0] = cam_add2;
-            gTxMsg.BUF[1] = cam_add2 >> 8;      
-            if (!MCOHW_PushMessage(&gTxMsg))
-            {
-            // failed to transmit
-            MCOUSER_FatalError(0x8801);
-            }
-            //! Transmit this without using the TPDO
-            
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            gProcImg[IN_digi_0] |= 0x01;
-            i = MCO_ProcessStack_Menu();
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            
-            MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
-            
-            StackPointer = 0;
-            MenuStackc[StackPointer].Index[0] = 0;
-            MenuStackc[StackPointer].Index[1] = 0;
-            MenuStackc[StackPointer].Index[2] = 5;
-            MenuStackc[StackPointer].Index[3] = 2;
-            MenuStackc[StackPointer].CursorPos = 1;
-            MenuStackc[StackPointer].FirstLine = 0;
-            Gen_Flags |= Gen_Flags_Menu_Active;
-            
-			TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
-			CursorDownFlag = 0;
-			CursorUpFlag = 0;
-			SelectFlag = 0;
-			LoadMenu ( MenuStackc[StackPointer].Index );
-            InsertCursor ();
-            DisplayTitler ();
-        }
+	// returns early if camera not enabled
+	if (Cam2Enable.value == 2){ // 2 == 'DISABLED', 1 == ' ENABLED'
+		return;
+	}
+	
+	if ( (gProcImg[OUT_digi_10] == 0x08) &&              //command to activate menu
+		(gProcImg[OUT_digi_11] == (cam_add2 & 0x00FF)) &&         //lsb - old address
+			(gProcImg[OUT_digi_12]<< 8 ==  (cam_add2 & 0xFF00)) &&
+				!(Gen_Flags & Gen_Flags_Menu_Active) )
+	{
+		gProcImg[OUT_digi_8] = (cam_add2 & 0x00FF);
+		gProcImg[OUT_digi_9] = (cam_add2 & 0xFF00)>>8;
+		VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
+		VideoSw_Port |= VideoSw;	 //Select Camera 1
+		
+		//turn off other cameras
+		gTxMsg.ID = 0x421;
+		gTxMsg.LEN = 2; 
+		gTxMsg.BUF[0] = cam_add2;
+		gTxMsg.BUF[1] = cam_add2 >> 8;      
+		if (!MCOHW_PushMessage(&gTxMsg))
+		{
+		// failed to transmit
+		MCOUSER_FatalError(0x8801);
+		}
+		//! Transmit this without using the TPDO
+		
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		gProcImg[IN_digi_0] |= 0x01;
+		i = MCO_ProcessStack();
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		
+		MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
+		
+		StackPointer = 0;
+		MenuStackc[StackPointer].Index[0] = 0;
+		MenuStackc[StackPointer].Index[1] = 0;
+		MenuStackc[StackPointer].Index[2] = 5;
+		MenuStackc[StackPointer].Index[3] = 2;
+		MenuStackc[StackPointer].CursorPos = 1;
+		MenuStackc[StackPointer].FirstLine = 0;
+		Gen_Flags |= Gen_Flags_Menu_Active;
+		
+		TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
+		CursorDownFlag = 0;
+		CursorUpFlag = 0;
+		SelectFlag = 0;
+		LoadMenu ( MenuStackc[StackPointer].Index );
+		InsertCursor ();
+		DisplayTitler ();
+	}
 
     if ( gProcImg[OUT_digi_8] == (cam_add2 & 0x00FF) &&
         gProcImg[OUT_digi_9]<< 8 == (cam_add2 & 0xFF00) )    //compare
@@ -1755,30 +1922,44 @@ void CameraMain2 ( void )
     	VSEL_PORT &= ~CAM_ON;       //turn off Output
     }
 
-    if ( gProcImg[OUT_digi_10] & 0x01 )   //command to generate random address
+    if ( gProcImg[OUT_digi_10] == 0x01 )   //command to generate random address
     {
         srand(ran_num);               //seed the random number      
         cam_add2 = rand();
-        gProcImg[OUT_digi_10] = 0x00;
         cam_addx2[0] = cam_add2;     
         cam_addx2[1] = cam_add2>>8;
         Save_Camera_Add2();
     }
 
     //command to transmit address
-    if ( gProcImg[OUT_digi_10] & 0x02)   //called by scan_camera in 2-wire
+    if ( gProcImg[OUT_digi_10] == 0x02 && !addr_tx_pending )   //called by scan_camera in 2-wire
     {
-        gProcImg[OUT_digi_10] = 0x00;             
     	//VSEL_PORT &= ~CAM_ON;           //camera off, portA bit 0 low
 
         //make delay proportional to camera address so cameras report in ascending order
-		Timer1 = cam_add1/100;
-		while(Timer1);
-        
+        addr_tx_time = MCOHW_GetTime() + cam_add2/100;
+        addr_tx_pending = 1;
+    }
+
+     if ( (gProcImg[OUT_digi_10] == 0x04) &&              //command to store address
+            (gProcImg[OUT_digi_11] == (cam_add2 & 0x00FF)) &&         //lsb - old address
+                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add2 & 0xFF00)) ) //msb - old address
+    {   //change to new address
+        cam_add2 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
+        //send new address
+        cam_addx2[0] = cam_add2;
+        cam_addx2[1] = cam_add2>>8;
+        Save_Camera_Add2();
+   }
+
+    //delayed 0x02 reply, sent without blocking the main loop
+    if ( addr_tx_pending && MCOHW_IsTimeExpired(addr_tx_time) )
+    {
+        addr_tx_pending = 0;
         gTxMsg.ID = 0x2a1;
-        gTxMsg.LEN = 2; 
+        gTxMsg.LEN = 3;
         gTxMsg.BUF[0] = cam_add2;
-        gTxMsg.BUF[1] = cam_add2 >> 8;      
+        gTxMsg.BUF[1] = cam_add2 >> 8;
         if (!MCOHW_PushMessage(&gTxMsg))
         {
             // failed to transmit
@@ -1786,18 +1967,13 @@ void CameraMain2 ( void )
         }
          //! Transmit this without using the TPDO
     }
+}
 
-     if ( (gProcImg[OUT_digi_10] & 0x04) &&              //command to store address 
-            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
-                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add2 & 0xFF00)) ) //msb - old address
-    {   //change to new address
-        cam_add2 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
-        gProcImg[OUT_digi_10] = 0x00;             
-        //send new address            
-        cam_addx2[0] = cam_add2;     
-        cam_addx2[1] = cam_add2>>8;
-        Save_Camera_Add2();
-   } 
+/* Consumes the 0x521 camera command once both cameras have seen it, so a
+ * command is acted on exactly one pass whether or not a camera is disabled. */
+void clear_camera_commands ( void )
+{
+	gProcImg[OUT_digi_10] = 0x00;
 }
 
 void throwGhost(void)
@@ -1894,11 +2070,8 @@ void throwGhost(void)
 
         case 7:		    //turn on head
 			//HeadOnOff.value=2;
-			//strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
-			//getvalue (&HeadOnOff,2);
-			update_menu_var_by_str(&HeadOnOff, " ON");
-
-
+			strncpy(HeadOnOff.str_value," ON",HeadOnOff.len_str);
+			getvalue (&HeadOnOff,2);
 			Timer2 = 2 * RTI_One_Sec;    
             ++ghostState; 
 			break;
@@ -1911,11 +2084,9 @@ void throwGhost(void)
 			break;
 			
 		case 9:		    //turn on pump
-			//strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
-			//getvalue(&PumpOnOff,0);
-			//PumpOnOff.value=2;
-			update_menu_var_by_str(&PumpOnOff, " ON");
-
+			strncpy(PumpOnOff.str_value," ON",PumpOnOff.len_str);
+			getvalue(&PumpOnOff,0);
+			PumpOnOff.value=2;
 			Timer2 = 4 * RTI_One_Sec;
 			Display ( "Proc:Purging" );
 			++ghostState;
@@ -1929,8 +2100,7 @@ void throwGhost(void)
 			break;
 			
 		case 11:		    //turn off pump
-			update_menu_var_by_str(&PumpOnOff, "OFF");
-			//PumpOnOff.value=1;
+			PumpOnOff.value=1;
 			Timer2 = 15 * RTI_One_Sec;
             ++ghostState;
 			break;
@@ -1943,12 +2113,9 @@ void throwGhost(void)
 			break;
 
 		case 13:		//turn off head
-			//strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
-			//getvalue (&HeadOnOff,1);
-			//HeadOnOff.value=1;
-			update_menu_var_by_str(&HeadOnOff, "OFF");
-
-
+			strncpy(HeadOnOff.str_value,"OFF",HeadOnOff.len_str);
+			getvalue (&HeadOnOff,1);
+			HeadOnOff.value=1;
 			Timer2 = 5 * RTI_One_Sec;
             ++ghostState;
 			break;
@@ -2047,88 +2214,4 @@ float PID_Loop(struct PID* pid, float actual_value) {
     pid->previous_error = error;
 
 	return output;
-}
-
-int update_menu_var_by_value(struct menu_var *var, float new_value) {
-    // This function updates a menu variable's value, then updates the str_value
-    // and notifies the GUI of the change. Standard wrapper function for updating menu variables.
-    // companion to update_menu_var_by_str
-    if (var == NULL) {
-        return -1; // Error: variable is NULL
-    }
-
-
-    // Check if the new value is within the allowed range
-    if (new_value < var->min || new_value > var->max) {
-        return -1; // Error: value out of bounds
-    }
-
-    // No update needed if the value is the same
-    if (var->value == new_value) {
-        return 0; 
-    }
-
-
-    // Directly update the variable's value
-    var->value = new_value;
-   
-    // Update the string representation if applicable
-    getstrval(var);
-   
-    // Notify the GUI of the change, returns -1 if fails, 0 if success
-    if (update_value_gui(var)){
-        return -1;
-    }
-
-
-    return 0; // Success
-}
-
-
-
-
-int update_menu_var_by_str(struct menu_var *var, const char *new_str) {
-    // This function updates a menu variable's str_value, then updates the value
-    // and notifies the GUI of the change. Standard wrapper function for updating menu variables.
-    if (var == NULL || new_str == NULL) {
-        return -1; // Error: variable or new string is NULL
-    }
-
-    // if old string is the same as new string, no update needed
-    if (strcmp(var->str_value, new_str) == 0) {
-        return 0; 
-    }
-   
-    // Copy the new string value
-    sprintf(var->str_value, "%s", new_str);
-   
-    // Update the numeric representation if applicable
-    getvalue(var, 0);
-   
-    // Notify the GUI of the change, returns -1 if fails, 0 if success
-    if (update_value_gui(var)){
-        return -1;
-    }
-
-
-    return 0;
-}
-
-
-int SkipVarFunction ( void )
-{
-    int i;
-	struct menu_var *var;
-	
-	if ( !Variable_flag ) //Here the first time select is pushed
-	{
-	    i = FindMenu(); 
-	    var = Menuc[i].VarPntr[MenuStackc[StackPointer].CursorPos+MenuStackc[StackPointer].FirstLine-1];
-	    //var is the 1st variable pointed to in the menu
-		next_variable( var );
-		
-		Variable_flag = 1;
-	}
-    
-	return StdVarFunction();
 }

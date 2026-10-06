@@ -50,7 +50,10 @@ if defined project_name (
         if exist "!dbg_file!" (
             if exist "!NOICE_EXE!" (
                 echo Launching NoICE12 with !dbg_file!
-                start "" "!NOICE_EXE!" "!dbg_file!"
+                REM NoICE OPENs a command-line file by extension (.dbg may just be VIEWed), so LOAD it via a command file
+                set "noi_file=%cd%\Build\load_%project_name%.noi"
+                > "!noi_file!" echo LOAD "!dbg_file!"
+                start "" "!NOICE_EXE!" "!noi_file!"
             ) else (
                 echo WARNING: NoICE12 not found at !NOICE_EXE!
             )
