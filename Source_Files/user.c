@@ -221,6 +221,10 @@ UNSIGNED8 i;
   // RPDO7, default ID (), 1 bytes
   MCO_InitRPDO(7,0x1e1,1,IN_digi_31);       //command RPDO 
 
+  // hd camera pairing
+  // RPDO 8, 0x321, 8 bytes
+  MCO_InitRPDO(8,0x321,8,OUT_digi_16);        
+
   // TPDO1, default ID ($NODEID+0x180), 0ms event, 100ms inhibit, 1 bytes, Trigger
   MCO_InitTPDO(1,0x200,0,100,1,IN_digi_0); 
 

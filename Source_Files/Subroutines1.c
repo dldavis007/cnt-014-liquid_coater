@@ -144,6 +144,7 @@ extern char HeadSpdOut;
 
 extern unsigned cam_add1;
 extern unsigned cam_add2;
+UNSIGNED16 paired_camera_address;
 
 extern unsigned ran_num;  //used to create unique camera address  
 
@@ -157,7 +158,7 @@ extern CAN_MSG gTxMsg;
  * which unit is asking; the answer echoes it back in the same position. */
 #define TRIG_REQUEST_BIT      0x02   /* gProcImg[OUT_digi_0] */
 #define CAM_QUERY_TRIG_MODE   0x10   /* 0x521 BUF[0] */
-#define CAM_CMD_TRIG_RESPONSE 0x20   /* gProcImg[OUT_digi_10] */
+#define CAM_CMD_TRIG_RESPONSE 0x16   /* gProcImg[OUT_digi_10] */
 #define CAM_TRIG_NODE         (OUT_digi_10 + 3)   /* NODE_ID byte of the answer */
 #define TRIG_QUERY_TIMEOUT_MS 5000
 
@@ -586,104 +587,130 @@ Start by going to retracted position and start pumps, then extend to extended po
 
 
 
-/* Reads HDSDSetting as a whole number. The menu edits .value as a float with
- * inc 1, so it should already be integral - the rounding keeps a future
- * fractional increment from silently failing every == compare. */
-char HDSDMode ( void )
+// /* Reads internalExternal as a whole number. The menu edits .value as a float with
+//  * inc 1, so it should already be integral - the rounding keeps a future
+//  * fractional increment from silently failing every == compare. */
+char internalExternal ( void )
 {
-	return (char)( HDSDSetting.value + 0.5 );
+	return (char)( InternalExternalCameraSetting.value + 0.5 );
 }
 
-/* Sends the 0x521 trig-mode query to the active camera and arms the response
- * window. TRIG_SENT, or TRIG_NOCAM if no camera has been addressed. */
-TrigResult HDTrigQueryStart ( void )
-{
-	if ( !activeCamAddress )				/* no camera addressed yet */
-		return TRIG_NOCAM;
+// /* Sends the 0x521 trig-mode query to the active camera and arms the response
+//  * window. TRIG_SENT, or TRIG_NOCAM if no camera has been addressed. */
+// TrigResult HDTrigQueryStart ( void )
+// {
+// 	if ( !activeCamAddress )				/* no camera addressed yet */
+// 		return TRIG_NOCAM;
 
-	gTxMsg.ID = 0x521;
-	gTxMsg.LEN = 4;
-	gTxMsg.BUF[0] = CAM_QUERY_TRIG_MODE;
-	gTxMsg.BUF[1] = activeCamAddress;
-	gTxMsg.BUF[2] = activeCamAddress >> 8;
-	gTxMsg.BUF[3] = NODE_ID;
-	if ( !MCOHW_PushMessage ( &gTxMsg ) )
-	{
-		// failed to transmit
-		MCOUSER_FatalError ( 0x8801 );
-	}
+// 	gTxMsg.ID = 0x521;
+// 	gTxMsg.LEN = 4;
+// 	gTxMsg.BUF[0] = CAM_QUERY_TRIG_MODE;
+// 	gTxMsg.BUF[1] = activeCamAddress;
+// 	gTxMsg.BUF[2] = activeCamAddress >> 8;
+// 	gTxMsg.BUF[3] = NODE_ID;
+// 	if ( !MCOHW_PushMessage ( &gTxMsg ) )
+// 	{
+// 		// failed to transmit
+// 		MCOUSER_FatalError ( 0x8801 );
+// 	}
 
-	gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;	/* drop a stale answer */
-	trig_query_sent = true;
-	trig_query_timer = MCOHW_GetTime() + TRIG_QUERY_TIMEOUT_MS;
-	LOG_PRINTF(("Trig query sent to HD active camera, waiting for response..."));
-	return TRIG_SENT;
-}
+// 	gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;	/* drop a stale answer */
+// 	trig_query_sent = true;
+// 	trig_query_timer = MCOHW_GetTime() + TRIG_QUERY_TIMEOUT_MS;
+// 	LOG_PRINTF(("Trig query sent to HD active camera, waiting for response..."));
+// 	return TRIG_SENT;
+// }
 
-/* Resolves an armed trig query. TRIG_STARTED when the camera answers for this
- * node, TRIG_NOTIDLE if it answers while we are busy, TRIG_TIMEDOUT when the
- * window closes, TRIG_WAITING while it is still open, TRIG_IDLE if not armed. */
-TrigResult HDTrigQueryService ( void )
-{
-	if ( !trig_query_sent )
-		return TRIG_IDLE;
+// /* Resolves an armed trig query. TRIG_STARTED when the camera answers for this
+//  * node, TRIG_NOTIDLE if it answers while we are busy, TRIG_TIMEDOUT when the
+//  * window closes, TRIG_WAITING while it is still open, TRIG_IDLE if not armed. */
+// TrigResult HDTrigQueryService ( void )
+// {
+// 	if ( !trig_query_sent )
+// 		return TRIG_IDLE;
 
-	if ( ( gProcImg[OUT_digi_10] & CAM_CMD_TRIG_RESPONSE ) &&
-	     gProcImg[CAM_TRIG_NODE] == NODE_ID )
-	{
-		gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;
-		trig_query_sent = false;
-		if ( State != FinishState || ghostState )
-			return TRIG_NOTIDLE;
-		State = TrigState;
-		LOG_PRINTF(("Trig query response received from HD active camera, starting coating sequence..."));
-		return TRIG_STARTED;
-	}
+// 	if ( ( gProcImg[OUT_digi_10] >= CAM_CMD_TRIG_RESPONSE ) &&
+// 	     gProcImg[OUT_digi_10 + 3] == NODE_ID )
+// 	{
+// 		gProcImg[OUT_digi_10] &= ~CAM_CMD_TRIG_RESPONSE;
+// 		trig_query_sent = false;
+// 		if ( State != FinishState || ghostState )
+// 			return TRIG_NOTIDLE;
+// 		State = TrigState;
+// 		LOG_PRINTF(("Trig query response received from HD active camera, starting coating sequence..."));
+// 		return TRIG_STARTED;
+// 	}
 
-	if ( MCOHW_IsTimeExpired ( trig_query_timer ) )
-	{
-		trig_query_sent = false;
-		LOG_PRINTF(("HD Trig query timed out"));
-		return TRIG_TIMEDOUT;
-	}
+// 	if ( MCOHW_IsTimeExpired ( trig_query_timer ) )
+// 	{
+// 		trig_query_sent = false;
+// 		LOG_PRINTF(("HD Trig query timed out"));
+// 		return TRIG_TIMEDOUT;
+// 	}
 
-	return TRIG_WAITING;
-}
+// 	return TRIG_WAITING;
+// }
 
 /* Trig request: SD starts the coating sequence directly, HD first asks the
  * active camera whether this unit owns the trigger. Returns what this pass
  * did - the handshake outcome when one resolved, else the request's. */
 TrigResult TrigRequest ( void )
 {
-	char hdsd = HDSDMode();
-	TrigResult result;
+	char internalexternal = internalExternal();
+	TrigResult result = TRIG_NOCAM;
 
 	/* Resolve an answer already in flight FIRST: arming clears the response
 	 * bit, so a new request arriving on the same pass would otherwise discard
 	 * the answer we were waiting for. */
-	result = HDTrigQueryService();
+	// result = HDTrigQueryService();
 
 	if ( gProcImg[OUT_digi_0] & TRIG_REQUEST_BIT )
 	{
 		gProcImg[OUT_digi_0] &= ~TRIG_REQUEST_BIT;
-
+		// Display ( "Proc:Triggered" );// Temp remove
 		/* A request landing on the pass that started the sequence is consumed
 		 * but cannot re-arm - we are no longer idle. */
 		if ( result != TRIG_STARTED )
 		{
 			if ( State != FinishState || ghostState ) 	// we don't trigger if State != FinishState (in middle of coating sequence) or ghostState (middle of purge sequence)
-				result = TRIG_NOTIDLE;
-			else if ( hdsd == HDSD_HD )					// we are HD, so we need to ask the camera if we own the trigger
-				result = HDTrigQueryStart();
-			else if ( hdsd != HDSD_SD )     // this shouldn't ever happen (hdsd enum is range 1-2) but this is an edge case
-				result = TRIG_IDLE;			/* mode has no trig path */
-			else if ( VSEL_PORT & CAM_ON && (hdsd == HDSD_SD) ) // if we are SD and the camera is on, we can start the sequence
+				return TRIG_NOTIDLE;
+			else if ( internalexternal == EXTERNAL_CAMERA )	{				// we are HD, so we need to ask the camera if we own the trigger
+				// result = HDTrigQueryStart();
+				// if paired camera address is the one that's active AND if paired camera address has been set (0 is pre paired init state)
+				if (paired_camera_address == activeCamAddress && paired_camera_address != 0){
+					State = TrigState;
+					LOG_PRINTF(("[host] EXTERNAL PAIRED CAMERA ADDRESS: %04X IS ACTIVE CAMERA ADDRESS: %04X, triggering...\n", paired_camera_address, activeCamAddress));
+					return TRIG_STARTED;
+				}
+				else if (paired_camera_address == 0){
+					LOG_PRINTF(("[host] EXTERNAL PAIRED CAMERA ADDRESS: %04X IS 0 and NOT PAIRED, not triggering...\n", paired_camera_address));
+					Display("Warn:NO EXT CAM PAIRED");
+				}
+				else {
+					LOG_PRINTF(("[host] EXTERNAL PAIRED CAMERA ADDRESS: %04X IS NOT ACTIVE CAMERA ADDRESS: %04X, not triggering...\n", paired_camera_address, activeCamAddress));
+					Display("Warn:WRONG EXT CAM");
+				}
+				
+				
+				return TRIG_IDLE;
+				
+			}
+			else if ( internalexternal != INTERNAL_CAMERA )     // this shouldn't ever happen (hdsd enum is range 1-2) but this is an edge case
+				return TRIG_IDLE;			/* mode has no trig path */
+			else if ( VSEL_PORT & CAM_ON && (internalexternal == INTERNAL_CAMERA)) // if we are SD and the camera is on, we can start the sequence
 			{
 				State = TrigState;
-				result = TRIG_STARTED;
+				LOG_PRINTF(("[host] INTERNAL CAMERA(s) ACTIVE, triggering..\n"));
+
+			
+				return TRIG_STARTED;
 			}
-			else if (hdsd == HDSD_SD)							// we are SD but the camera is off
-				result = TRIG_NOCAM;
+			else {
+				LOG_PRINTF(("[host] INTERNAL CAMERA(s) NOT ACTIVE, not triggering..\n"));
+				Display("Warn:WRONG INT CAMERA");
+				return TRIG_IDLE;
+			}
+			
 		}
 	}
 
@@ -1285,6 +1312,8 @@ void doevents ( void )
 			update_active_cam_address();
 			CameraMain1 ();
 			CameraMain2 ();
+			clear_camera_commands();	// must follow both CameraMains
+			poll_paired_camera_address();
 			
 			TrigRequest ();
 
@@ -1620,9 +1649,9 @@ int update_active_cam_address(void){
 	addr = ( gProcImg[OUT_digi_9] << 8 ) + gProcImg[OUT_digi_8];
 
 	/* another unit's camera */
-    if ( addr != cam_add1 && addr != cam_add2 ){
-        return 0;                       
-	}
+    // if ( addr != cam_add1 && addr != cam_add2 ){
+    //     return 0;                       
+	// }
 	// if already updated
     if ( addr == activeCamAddress ){
         return 0;
@@ -1633,69 +1662,112 @@ int update_active_cam_address(void){
     return 1;
 }
 
+int poll_paired_camera_address(void){
+
+	// read polled spot in gProc for 321 rpdo
+	UNSIGNED16 received_camera_address = gProcImg[OUT_digi_17] + (gProcImg[OUT_digi_18] << 8);
+	UNSIGNED8 received_paired_triggerable_unit = gProcImg[OUT_digi_16];
+
+	// TODO: single slot, polled once per pass - a second 321 before the next
+	// poll overwrites the first (watch busy-wait loops, e.g. find cameras)
+
+	// 0 = no new 321 since last poll
+    if (received_camera_address == 0){
+		return 0;
+	}
+    memset(&gProcImg[OUT_digi_16], 0, 8);   // consume every 321
+
+	// if the paired message IS for our node id, then pair it
+	if (received_paired_triggerable_unit == NODE_ID){
+		// ignore if we've already set it
+		if (paired_camera_address == received_camera_address){
+			return 0;
+		}
+		paired_camera_address = received_camera_address;
+		LOG_PRINTF(("[host] NEW PAIRED CAMERA ADDRESS: %04X\n", paired_camera_address));
+		return 1;
+	}
+
+	// if the received_camera_address matches the last paired_camera_address BUT the NODE_ID doesn't, it means that camera has been paired to a new unit
+	if (received_camera_address == paired_camera_address){
+		paired_camera_address = 0;
+		LOG_PRINTF(("[host] PAIRED CAMERA %04X MOVED TO UNIT %02X, unpaired\n", received_camera_address, received_paired_triggerable_unit));
+		return 1;
+	}
+
+	// idle case
+	return 0;
+}
+
 
 void CameraMain1 ( void )
 {
   int i;
-	
+  static UNSIGNED16 addr_tx_time;
+  static char addr_tx_pending = 0;
+
 	//light value is set in settings menu 0 - 100% duty
     //PWMDTY1 = atoi ( LightLevel1 ) * atoi (LightLevel1);
 
     ++ran_num;      //random number used for camera address
 
-	    sprintf ( disp_add1.str_value, "%04X", cam_add1 );    //for video diplay of camera address
+	// TODO only update if this value has changed, instead of sprintf call everytime
+
+	sprintf ( disp_add1.str_value, "%04X", cam_add1 );    //for video diplay of camera address
+
+	// returns early if camera not enabled
+	if (Cam1Enable.value == 2){ // 2 == 'DISABLED', 1 == ' ENABLED'
+		return;
+	}
         
-        if ( (gProcImg[OUT_digi_10] & 0x08) &&              //command to activate menu
-            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
-                (gProcImg[OUT_digi_12]<< 8 ==  (cam_add1 & 0xFF00)) &&
-                 !(Gen_Flags & Gen_Flags_Menu_Active) )
-        {
-            gProcImg[OUT_digi_10] = 0x00;
-            gProcImg[OUT_digi_11] = 0x00;
-            gProcImg[OUT_digi_12] = 0x00;
-            gProcImg[OUT_digi_8] = (cam_add1 & 0x00FF);
-	        gProcImg[OUT_digi_9] = (cam_add1 & 0xFF00)>>8;
-            VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
-			VideoSw_Port |= VideoSw;	 //Select Camera 1
-            
-            //turn off other cameras
-			gTxMsg.ID = 0x421;
-            gTxMsg.LEN = 2; 
-            gTxMsg.BUF[0] = cam_add1;
-            gTxMsg.BUF[1] = cam_add1 >> 8;      
-            if (!MCOHW_PushMessage(&gTxMsg))
-            {
-            // failed to transmit
-            MCOUSER_FatalError(0x8801);
-            }
-            //! Transmit this without using the TPDO
-            
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            gProcImg[IN_digi_0] |= 0x01;
-            i = MCO_ProcessStack();
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            
-            MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
-            
-            StackPointer = 0;
-            MenuStackc[StackPointer].Index[0] = 0;
-            MenuStackc[StackPointer].Index[1] = 0;
-            MenuStackc[StackPointer].Index[2] = 5;
-            MenuStackc[StackPointer].Index[3] = 1;
-            MenuStackc[StackPointer].CursorPos = 1;
-            MenuStackc[StackPointer].FirstLine = 0;
-            Gen_Flags |= Gen_Flags_Menu_Active;
-            
-			TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
-			CursorDownFlag = 0;
-			CursorUpFlag = 0;
-			SelectFlag = 0;
-			LoadMenu ( MenuStackc[StackPointer].Index );
-            InsertCursor ();
-            DisplayTitler ();
-        }
+	if ( (gProcImg[OUT_digi_10] == 0x08) &&              //command to activate menu
+		(gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
+			(gProcImg[OUT_digi_12]<< 8 ==  (cam_add1 & 0xFF00)) &&
+				!(Gen_Flags & Gen_Flags_Menu_Active) )
+	{
+		gProcImg[OUT_digi_8] = (cam_add1 & 0x00FF);
+		gProcImg[OUT_digi_9] = (cam_add1 & 0xFF00)>>8;
+		VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
+		VideoSw_Port |= VideoSw;	 //Select Camera 1
+		
+		//turn off other cameras
+		gTxMsg.ID = 0x421;
+		gTxMsg.LEN = 2; 
+		gTxMsg.BUF[0] = cam_add1;
+		gTxMsg.BUF[1] = cam_add1 >> 8;      
+		if (!MCOHW_PushMessage(&gTxMsg))
+		{
+		// failed to transmit
+		MCOUSER_FatalError(0x8801);
+		}
+		//! Transmit this without using the TPDO
+		
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		gProcImg[IN_digi_0] |= 0x01;
+		i = MCO_ProcessStack();
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		
+		MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
+		
+		StackPointer = 0;
+		MenuStackc[StackPointer].Index[0] = 0;
+		MenuStackc[StackPointer].Index[1] = 0;
+		MenuStackc[StackPointer].Index[2] = 5;
+		MenuStackc[StackPointer].Index[3] = 1;
+		MenuStackc[StackPointer].CursorPos = 1;
+		MenuStackc[StackPointer].FirstLine = 0;
+		Gen_Flags |= Gen_Flags_Menu_Active;
+		
+		TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
+		CursorDownFlag = 0;
+		CursorUpFlag = 0;
+		SelectFlag = 0;
+		LoadMenu ( MenuStackc[StackPointer].Index );
+		InsertCursor ();
+		DisplayTitler ();
+	}
 
 
     if ( gProcImg[OUT_digi_8] == (cam_add1 & 0x00FF) &&
@@ -1716,7 +1788,7 @@ void CameraMain1 ( void )
     	VSEL_PORT &= ~CAM_ON;       //turn camera off, portA bit 0 low
     }
 
-    if ( gProcImg[OUT_digi_10] & 0x01 )   //command to generate random address
+    if ( gProcImg[OUT_digi_10] == 0x01 )   //command to generate random address
     {
         srand(ran_num);               //seed the random number      
         cam_add1 = rand();
@@ -1726,16 +1798,32 @@ void CameraMain1 ( void )
     }
 
     //command to transmit address
-    if ( gProcImg[OUT_digi_10] & 0x02)   //called by scan_camera in 2-wire
+    if ( gProcImg[OUT_digi_10] == 0x02 && !addr_tx_pending )   //called by scan_camera in 2-wire
     {
         //make delay proportional to camera address so cameras report in ascending order
-		Timer1 = cam_add1/100;
-		while(Timer1);
-        
+        addr_tx_time = MCOHW_GetTime() + cam_add1/100;
+        addr_tx_pending = 1;
+    }
+
+     if ( (gProcImg[OUT_digi_10] == 0x04) &&              //command to store address
+            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
+                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add1 & 0xFF00)) ) //msb - old address
+    {   //change to new address
+        cam_add1 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
+        //send new address
+        cam_addx1[0] = cam_add1;
+        cam_addx1[1] = cam_add1>>8;
+        Save_Camera_Add1();
+   }
+
+    //delayed 0x02 reply, sent without blocking the main loop
+    if ( addr_tx_pending && MCOHW_IsTimeExpired(addr_tx_time) )
+    {
+        addr_tx_pending = 0;
         gTxMsg.ID = 0x2a1;
-        gTxMsg.LEN = 3; 
+        gTxMsg.LEN = 3;
         gTxMsg.BUF[0] = cam_add1;
-        gTxMsg.BUF[1] = cam_add1 >> 8;      
+        gTxMsg.BUF[1] = cam_add1 >> 8;
         if (!MCOHW_PushMessage(&gTxMsg))
         {
             // failed to transmit
@@ -1744,88 +1832,77 @@ void CameraMain1 ( void )
          //! Transmit this without using the TPDO
     }
 
-     if ( (gProcImg[OUT_digi_10] & 0x04) &&              //command to store address 
-            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
-                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add1 & 0xFF00)) ) //msb - old address
-    {   //change to new address
-        cam_add1 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
-        //send new address            
-        cam_addx1[0] = cam_add1;     
-        cam_addx1[1] = cam_add1>>8;
-        Save_Camera_Add1();
-   }
-   // TODO does COATING CAM's address not get put in OUT_digi_8? 
-   	// if (gProcImg[OUT_digi_8] || gProcImg[OUT_digi_9]){
-	// 	activeCamAddress = (gProcImg[OUT_digi_9] << 8) + (gProcImg[OUT_digi_8]);
-	// 	// activeCamAddress = (gProcImg[OUT_digi_9]) + (gProcImg[OUT_digi_8] << 8);
-	// 	LOG_IF_CHANGED("New Active Camera Address: %04X", activeCamAddress);
-   	// }
-
 }
 
 
 void CameraMain2 ( void )
 {
     int i;
-	
+    static UNSIGNED16 addr_tx_time;
+    static char addr_tx_pending = 0;
+
 	//light value is set in settings menu 0 - 100% duty
     //PWMDTY1 = atoi ( LightLevel2 ) * atoi (LightLevel2);
 
     ++ran_num;      //random number used for camera address
+	
+	// TODO only update if this value has changed, instead of sprintf call everytime
 
-	    sprintf ( disp_add2.str_value, "%04X", cam_add2 );    //for video diplay of camera address
-        
-        if ( (gProcImg[OUT_digi_10] & 0x08) &&              //command to activate menu
-            (gProcImg[OUT_digi_11] == (cam_add2 & 0x00FF)) &&         //lsb - old address
-                (gProcImg[OUT_digi_12]<< 8 ==  (cam_add2 & 0xFF00)) &&
-                 !(Gen_Flags & Gen_Flags_Menu_Active) )
-        {
-            gProcImg[OUT_digi_10] = 0x00;
-            gProcImg[OUT_digi_11] = 0x00;
-            gProcImg[OUT_digi_12] = 0x00;
-            gProcImg[OUT_digi_8] = (cam_add2 & 0x00FF);
-	        gProcImg[OUT_digi_9] = (cam_add2 & 0xFF00)>>8;
-            VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
-			VideoSw_Port |= VideoSw;	 //Select Camera 1
-            
-            //turn off other cameras
-			gTxMsg.ID = 0x421;
-            gTxMsg.LEN = 2; 
-            gTxMsg.BUF[0] = cam_add2;
-            gTxMsg.BUF[1] = cam_add2 >> 8;      
-            if (!MCOHW_PushMessage(&gTxMsg))
-            {
-            // failed to transmit
-            MCOUSER_FatalError(0x8801);
-            }
-            //! Transmit this without using the TPDO
-            
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            gProcImg[IN_digi_0] |= 0x01;
-            i = MCO_ProcessStack();
-            Timer1 = RTI_One_Sec * .10;
-            while ( Timer1 );
-            
-            MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
-            
-            StackPointer = 0;
-            MenuStackc[StackPointer].Index[0] = 0;
-            MenuStackc[StackPointer].Index[1] = 0;
-            MenuStackc[StackPointer].Index[2] = 5;
-            MenuStackc[StackPointer].Index[3] = 2;
-            MenuStackc[StackPointer].CursorPos = 1;
-            MenuStackc[StackPointer].FirstLine = 0;
-            Gen_Flags |= Gen_Flags_Menu_Active;
-            
-			TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
-			CursorDownFlag = 0;
-			CursorUpFlag = 0;
-			SelectFlag = 0;
-			LoadMenu ( MenuStackc[StackPointer].Index );
-            InsertCursor ();
-            DisplayTitler ();
-        }
+	sprintf ( disp_add2.str_value, "%04X", cam_add2 );    //for video diplay of camera address
+
+	// returns early if camera not enabled
+	if (Cam2Enable.value == 2){ // 2 == 'DISABLED', 1 == ' ENABLED'
+		return;
+	}
+	
+	if ( (gProcImg[OUT_digi_10] == 0x08) &&              //command to activate menu
+		(gProcImg[OUT_digi_11] == (cam_add2 & 0x00FF)) &&         //lsb - old address
+			(gProcImg[OUT_digi_12]<< 8 ==  (cam_add2 & 0xFF00)) &&
+				!(Gen_Flags & Gen_Flags_Menu_Active) )
+	{
+		gProcImg[OUT_digi_8] = (cam_add2 & 0x00FF);
+		gProcImg[OUT_digi_9] = (cam_add2 & 0xFF00)>>8;
+		VSEL_PORT |= CAM_ON;       //turn camera on, portA bit 0 high
+		VideoSw_Port |= VideoSw;	 //Select Camera 1
+		
+		//turn off other cameras
+		gTxMsg.ID = 0x421;
+		gTxMsg.LEN = 2; 
+		gTxMsg.BUF[0] = cam_add2;
+		gTxMsg.BUF[1] = cam_add2 >> 8;      
+		if (!MCOHW_PushMessage(&gTxMsg))
+		{
+		// failed to transmit
+		MCOUSER_FatalError(0x8801);
+		}
+		//! Transmit this without using the TPDO
+		
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		gProcImg[IN_digi_0] |= 0x01;
+		i = MCO_ProcessStack();
+		Timer1 = RTI_One_Sec * .10;
+		while ( Timer1 );
+		
+		MenuTimer = MenuTime * 2; //briefly disable up/down after menu is brought up
+		
+		StackPointer = 0;
+		MenuStackc[StackPointer].Index[0] = 0;
+		MenuStackc[StackPointer].Index[1] = 0;
+		MenuStackc[StackPointer].Index[2] = 5;
+		MenuStackc[StackPointer].Index[3] = 2;
+		MenuStackc[StackPointer].CursorPos = 1;
+		MenuStackc[StackPointer].FirstLine = 0;
+		Gen_Flags |= Gen_Flags_Menu_Active;
+		
+		TC0_RCVD_Data &= ~0x07;  //Make sure up/down/select not active
+		CursorDownFlag = 0;
+		CursorUpFlag = 0;
+		SelectFlag = 0;
+		LoadMenu ( MenuStackc[StackPointer].Index );
+		InsertCursor ();
+		DisplayTitler ();
+	}
 
     if ( gProcImg[OUT_digi_8] == (cam_add2 & 0x00FF) &&
         gProcImg[OUT_digi_9]<< 8 == (cam_add2 & 0xFF00) )    //compare
@@ -1845,30 +1922,44 @@ void CameraMain2 ( void )
     	VSEL_PORT &= ~CAM_ON;       //turn off Output
     }
 
-    if ( gProcImg[OUT_digi_10] & 0x01 )   //command to generate random address
+    if ( gProcImg[OUT_digi_10] == 0x01 )   //command to generate random address
     {
         srand(ran_num);               //seed the random number      
         cam_add2 = rand();
-        gProcImg[OUT_digi_10] = 0x00;
         cam_addx2[0] = cam_add2;     
         cam_addx2[1] = cam_add2>>8;
         Save_Camera_Add2();
     }
 
     //command to transmit address
-    if ( gProcImg[OUT_digi_10] & 0x02)   //called by scan_camera in 2-wire
+    if ( gProcImg[OUT_digi_10] == 0x02 && !addr_tx_pending )   //called by scan_camera in 2-wire
     {
-        gProcImg[OUT_digi_10] = 0x00;             
     	//VSEL_PORT &= ~CAM_ON;           //camera off, portA bit 0 low
 
         //make delay proportional to camera address so cameras report in ascending order
-		Timer1 = cam_add1/100;
-		while(Timer1);
-        
+        addr_tx_time = MCOHW_GetTime() + cam_add2/100;
+        addr_tx_pending = 1;
+    }
+
+     if ( (gProcImg[OUT_digi_10] == 0x04) &&              //command to store address
+            (gProcImg[OUT_digi_11] == (cam_add2 & 0x00FF)) &&         //lsb - old address
+                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add2 & 0xFF00)) ) //msb - old address
+    {   //change to new address
+        cam_add2 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
+        //send new address
+        cam_addx2[0] = cam_add2;
+        cam_addx2[1] = cam_add2>>8;
+        Save_Camera_Add2();
+   }
+
+    //delayed 0x02 reply, sent without blocking the main loop
+    if ( addr_tx_pending && MCOHW_IsTimeExpired(addr_tx_time) )
+    {
+        addr_tx_pending = 0;
         gTxMsg.ID = 0x2a1;
-        gTxMsg.LEN = 3; 
+        gTxMsg.LEN = 3;
         gTxMsg.BUF[0] = cam_add2;
-        gTxMsg.BUF[1] = cam_add2 >> 8; 
+        gTxMsg.BUF[1] = cam_add2 >> 8;
         if (!MCOHW_PushMessage(&gTxMsg))
         {
             // failed to transmit
@@ -1876,18 +1967,13 @@ void CameraMain2 ( void )
         }
          //! Transmit this without using the TPDO
     }
+}
 
-     if ( (gProcImg[OUT_digi_10] & 0x04) &&              //command to store address 
-            (gProcImg[OUT_digi_11] == (cam_add1 & 0x00FF)) &&         //lsb - old address
-                ( (gProcImg[OUT_digi_12]<< 8) ==  (cam_add2 & 0xFF00)) ) //msb - old address
-    {   //change to new address
-        cam_add2 = gProcImg[OUT_digi_13] + (gProcImg[OUT_digi_14]<<8);
-        gProcImg[OUT_digi_10] = 0x00;             
-        //send new address            
-        cam_addx2[0] = cam_add2;     
-        cam_addx2[1] = cam_add2>>8;
-        Save_Camera_Add2();
-   } 
+/* Consumes the 0x521 camera command once both cameras have seen it, so a
+ * command is acted on exactly one pass whether or not a camera is disabled. */
+void clear_camera_commands ( void )
+{
+	gProcImg[OUT_digi_10] = 0x00;
 }
 
 void throwGhost(void)

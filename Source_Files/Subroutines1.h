@@ -50,16 +50,18 @@ int SecondCoatSeq ( int Start );
 int FirstCoatSeq ( int Start );
 void doevents ( void );
 int update_active_cam_address ( void );
+int poll_paired_camera_address ( void );
 void CameraMain1 ( void );
 void CameraMain2 ( void );
+void clear_camera_commands ( void );
 void throwGhost(void);
 int CleanCoatSeq ( int Start );
 
 /* HD/SD trig request handling, split out of doevents() so the handshake can be
  * unit tested. trig_query_sent / trig_query_timer stay externed per-TU, the way
  * this revision declares its other globals. */
-#define HDSD_SD 1
-#define HDSD_HD 2
+#define INTERNAL_CAMERA 1
+#define EXTERNAL_CAMERA 2
 
 typedef enum {
 	TRIG_IDLE = 0,		/* nothing to do this pass        */
@@ -71,7 +73,7 @@ typedef enum {
 	TRIG_NOTIDLE		/* busy: the request was ignored  */
 } TrigResult;
 
-char HDSDMode ( void );
+char internalExternal ( void );
 TrigResult HDTrigQueryStart ( void );
 TrigResult HDTrigQueryService ( void );
 TrigResult TrigRequest ( void );

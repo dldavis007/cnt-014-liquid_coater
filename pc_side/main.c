@@ -13,9 +13,15 @@
  * Note Rev4.33's doevents() has NO internal loop — Controller.c's main() calls
  * it from a while(1), so the loop lives here, exactly as on the target.
  *
- * Usage:  pc_side_host.exe [recv_port] [send_port]   (prompts if omitted)
+ * Usage:  pc_side_host.exe [recv_port] [send_port] [--hw-...]   (prompts if ports omitted)
  *         Defaults 20010 / 20100 = bind :20010, send to the shared
  *         can_udp_hub.py bus on :20100 alongside the other emulated nodes.
+ *         Hardware fidelity (on by default at the target's values, see
+ *         pc_side_host.c; --no-hw turns it all off):
+ *           --hw-rx-fifo=N        hold N received frames, drop the rest (5; 0 = off)
+ *           --hw-can-filters=0|1  apply the MSCAN acceptance filters (1)
+ *           --hw-ee-erase-ms=N    EEPROM writes block N ms per 4-byte sector (20; 0 = off)
+ *           --hw-can-tx=0|1       each transmit blocks for its 125 kbit/s bus time (1)
  *         Start the bus first:  python can_hub_gui.py  (C:\Working_Projects\can_emulators)
  */
 
@@ -66,6 +72,8 @@ void rti_thread_stop(void);
 void pc_side_reset(void);
 unsigned int pc_side_rti_ticks(void);
 unsigned int pc_side_rti_skipped(void);
+int  pc_side_hw_option(const char *arg);
+void pc_side_hw_log(void);
 
 static const char *coat_state_name(int s);        /* defined below */
 
@@ -112,8 +120,8 @@ static DWORD WINAPI loop_watchdog_fn(void *arg)
         rate    = real_hz / (double)RTI_One_Sec;
 
         snprintf(title, sizeof title,
-                 "CNT-014 coater host Rev4.33 | loop=%lu | State=%d %s | RTI %.0fHz (%.2fx) skip=%u%s",
-                 g_loop_count, (int)State, coat_state_name((int)State),
+                 "CNT-014 coater host Rev %s | loop=%lu | State=%d %s | RTI %.0fHz (%.2fx) skip=%u%s", 
+                 Revision, g_loop_count, (int)State, coat_state_name((int)State),
                  real_hz, rate, skips - last_skips,
                  stalled_secs ? " | *** STALLED ***" : "");
         SetConsoleTitleA(title);
@@ -264,16 +272,27 @@ static void disable_console_quickedit(void)
 int main(int argc, char **argv)
 {
     unsigned short recv_port, send_port;
+    int ports[2], nports = 0, i;
 
     signal(SIGINT, on_sigint);
     setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: live logs */
     disable_console_quickedit();
 
-    printf("12/48 Coater Rev4.33 - PC-side host  (Ctrl+C to quit)\n");
+    printf("12/48 Coater Rev %s - PC-side host  (Ctrl+C to quit)\n", Revision);
 
-    if (argc > 2) {
-        recv_port = (unsigned short)atoi(argv[1]);
-        send_port = (unsigned short)atoi(argv[2]);
+    /* --hw-* options anywhere; the first two other arguments are the ports. */
+    for (i = 1; i < argc; i++) {
+        if (pc_side_hw_option(argv[i]))
+            continue;
+        if (!strncmp(argv[i], "--", 2))
+            printf("unknown option %s (ignored)\n", argv[i]);
+        else if (nports < 2)
+            ports[nports++] = atoi(argv[i]);
+    }
+
+    if (nports == 2) {
+        recv_port = (unsigned short)ports[0];
+        send_port = (unsigned short)ports[1];
     } else {
         recv_port = ask_port("recv (this host listens on)", 20010);
         send_port = ask_port("send (hub/peer listens on)",  20100);
@@ -282,6 +301,7 @@ int main(int argc, char **argv)
     /* Start async logging now the interactive prompts are done, so all
      * subsequent logging is non-blocking. */
     pc_log_init();
+    pc_side_hw_log();
 
     if (pc_side_can_init(recv_port, send_port) != 0) {
         LOG_PRINTF(("[fatal] CAN/UDP init failed\n"));
@@ -328,8 +348,8 @@ int main(int argc, char **argv)
     InitCANOpen();
     LOG_PRINTF(("[host] unit + CANopen up, interrupts enabled\n"));
 
-    HDSDSetting.value = 2.0f;  /* default to HD active camera, for testing at least */
-    LOG_PRINTF(("[host] HDSDSetting.value = %.1f (default HD active camera for testing, default SD in production)\n", HDSDSetting.value));
+    InternalExternalCameraSetting.value = 2.0f;  /* default to HD active camera, for testing at least */
+    LOG_PRINTF(("[host] InternalExternalCameraSetting.value = %.1f (default External active camera for testing, default internal in production)\n", InternalExternalCameraSetting.value));
 
     /* Park the coater idle so the coating sequence is a no-op until commanded
      * (the trigger arrives over CAN, as on the target). */

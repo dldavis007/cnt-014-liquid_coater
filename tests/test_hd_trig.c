@@ -1,20 +1,15 @@
 /* test_hd_trig.c
  *
- * TrigRequest() and the HD trig-mode handshake it drives (Subroutines1.c).
+ * TrigRequest() and HD camera pairing (Subroutines1.c).
  *
- * SD mode (HDSDSetting == 1): a trig request with a camera on starts the
- * coating sequence immediately.
+ * INTERNAL (InternalExternalCameraSetting == 1): a trig request with a camera
+ * on (VSEL_PORT & CAM_ON) starts the coating sequence.
  *
- * HD mode (HDSDSetting == 2): the unit cannot know whether the active camera is
- * trig'd to IT or to another coater, so a trig request instead transmits a
- * 0x521 query - BUF[0]=0x10, BUF[1..2]=activeCamAddress, BUF[3]=NODE_ID - and
- * arms a 5 s window. The camera answers on 0x521 (RPDO6 -> camera_cmds[0..4]),
- * setting bit 0x20 with the owning node in camera_cmds[3]. A matching answer
- * starts the sequence; silence, or an answer naming another node, times out.
- *
- * The window is driven through set_mco_time(), which opts this suite into the
- * stubs' real wraparound compare - by default MCOHW_IsTimeExpired() is pinned
- * to 1 for the other suites. Nothing here uses wall-clock time.
+ * EXTERNAL (== 2): an HD camera pairs itself to a coater by sending 0x321
+ * (RPDO8 -> pairing_msg[0..7]): [0] = node id, [1..2] = camera address, low
+ * byte first. poll_paired_camera_address() latches it when [0] == NODE_ID. A
+ * trig request then starts the sequence only if the paired camera is the
+ * active one (activeCamAddress).
  */
 
 #include "unity.h"
@@ -27,374 +22,395 @@
 #include "Subroutines1.h"
 #include "Interrupts.h"
 
-/* Rev4.33 declares its globals per-TU rather than in a header, so each suite
- * externs what it touches the same way the firmware TUs do. */
 extern char State;
 extern char ghostState;
-extern struct menu_var HDSDSetting;
 extern unsigned int activeCamAddress;
-extern bool trig_query_sent;
-extern UNSIGNED16 trig_query_timer;
+extern UNSIGNED16 paired_camera_address;
 
-#define CAM_ADDR    0x0042      /* under 100: see test_cameras.c on Timer1 */
+#define CAM_ADDR    0x1942
+#define OTHER_ADDR  0x2855
 #define OTHER_NODE  0x55        /* any node id that is not ours */
-#define T0          0x1000      /* arbitrary arm time, far from wraparound */
 
-/* Arm the handshake from a known start: HD mode, idle, camera addressed,
- * clock at T0. Leaves trig_query_sent set and one 0x521 in the TX log. */
-static void arm_query(void)
+/* Writes a 0x321 pairing message into the process image. */
+static void pairing_from(unsigned char node, unsigned addr)
 {
-    set_mco_time(T0);
-    HDSDSetting.value = HDSD_HD;
-    State      = FinishState;
-    ghostState = 0;
-    activeCamAddress = CAM_ADDR;
-    can_tx_reset();
-    menu_data[0] |= 0x02;
-    TrigRequest();
+    memset(pairing_msg, 0, 8);
+    pairing_msg[0] = node;
+    pairing_msg[1] = addr & 0xFF;
+    pairing_msg[2] = (addr >> 8) & 0xFF;
 }
 
-/* The camera's answer: 0x20 with the owning node in byte 3. */
-static void answer_from(unsigned char node)
-{
-    camera_cmds[0] |= 0x20;
-    camera_cmds[3]  = node;
-}
+static void set_external(void) { InternalExternalCameraSetting.value = EXTERNAL_CAMERA; }
+static void set_internal(void) { InternalExternalCameraSetting.value = INTERNAL_CAMERA; }
 
-/* Index of the 0x521 query in the TX log, or -1. */
-static int query_index(void)
-{
-    unsigned i;
-    for (i = 0; i < can_tx_count && i < CAN_TX_LOG_N; i++)
-        if (can_tx_log[i].ID == 0x521 && can_tx_log[i].LEN >= 4
-            && can_tx_log[i].BUF[0] == 0x10)
-            return (int)i;
-    return -1;
-}
+static void request_trig(void) { menu_data[0] |= 0x02; }
 
 void setUp(void)
 {
     coat_test_begin();
-    clear_mco_time();
-    trig_query_sent  = false;
-    trig_query_timer = 0;
-    activeCamAddress = 0;
-    ghostState       = 0;
-    State            = FinishState;
-    menu_data[0]     = 0;
-    camera_cmds[0] = camera_cmds[1] = camera_cmds[2] = 0;
-    camera_cmds[3] = camera_cmds[4] = 0;
+    set_internal();
+    activeCamAddress      = 0;
+    paired_camera_address = 0;
+    ghostState            = 0;
+    State                 = FinishState;
+    menu_data[0]          = 0;
+    memset(pairing_msg, 0, 8);
+    VSEL_PORT &= ~CAM_ON;
     can_tx_reset();
 }
 
-void tearDown(void) { clear_mco_time(); }
+void tearDown(void) { }
 
 
 /* ==========================================================================
- * HDSDMode - the float guard
+ * internalExternal - the float guard
  * ========================================================================== */
 
-static void test_hdsd_mode_reads_whole_numbers(void)
+static void test_internal_external_reads_whole_numbers(void)
 {
-    HDSDSetting.value = 1.0f;
-    TEST_ASSERT_EQUAL_INT(1, HDSDMode());
-    HDSDSetting.value = 2.0f;
-    TEST_ASSERT_EQUAL_INT(2, HDSDMode());
+    InternalExternalCameraSetting.value = 1.0f;
+    TEST_ASSERT_EQUAL_INT(INTERNAL_CAMERA, internalExternal());
+    InternalExternalCameraSetting.value = 2.0f;
+    TEST_ASSERT_EQUAL_INT(EXTERNAL_CAMERA, internalExternal());
 }
 
-/* The menu stores .value as a float with inc 1, so it should always be
- * integral. This pins the rounding so a future fractional increment (or a
- * float that lands at 1.9999) cannot silently fail every == compare and
- * disable the HD path. */
-static void test_hdsd_mode_rounds_a_drifted_float(void)
+static void test_internal_external_rounds_a_drifted_float(void)
 {
-    HDSDSetting.value = 1.9999f;
-    TEST_ASSERT_EQUAL_INT_MESSAGE(2, HDSDMode(),
-        "a value just under 2 must still read as HD, not fall through to 1");
+    InternalExternalCameraSetting.value = 1.9999f;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(EXTERNAL_CAMERA, internalExternal(),
+        "a value just under 2 must still read as EXTERNAL");
 }
 
 
 /* ==========================================================================
- * SD mode
+ * Common to both modes
  * ========================================================================== */
 
-static void test_sd_trig_starts_the_sequence_without_a_query(void)
+static void test_no_request_does_nothing(void)
 {
-    HDSDSetting.value = 1.0f;
     VSEL_PORT |= CAM_ON;
-    set_actuator_moving(1);
-    menu_data[0] |= 0x02;
 
-    TEST_ASSERT_EQUAL_INT(TRIG_STARTED, TrigRequest());
+    TrigRequest();
 
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TrigState, State, "SD trig starts the sequence");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, can_tx_count, "SD must not query the camera");
+    TEST_ASSERT_EQUAL_INT(FinishState, State);
 }
 
-static void test_sd_trig_ignored_with_no_camera_on(void)
+static void test_trig_while_coating_is_rejected_and_consumed(void)
 {
-    HDSDSetting.value = 1.0f;
-    VSEL_PORT &= ~CAM_ON;
-    menu_data[0] |= 0x02;
-
-    TEST_ASSERT_EQUAL_INT(TRIG_NOCAM, TrigRequest());
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "no camera on: the trigger must not start the sequence");
-}
-
-/* HDSDSetting ranges 1..5; only 1 and 2 have a trig path. A mode with neither
- * must consume the request and do nothing - NOT fall through to the SD start. */
-static void test_trig_ignored_in_a_mode_with_no_trig_path(void)
-{
-    HDSDSetting.value = 3.0f;
-    VSEL_PORT |= CAM_ON;
-    menu_data[0] |= 0x02;
-
-    TEST_ASSERT_EQUAL_INT(TRIG_IDLE, TrigRequest());
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "mode 3 has no trig path; the sequence must not start");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, can_tx_count, "and nothing is queried");
-}
-
-/* A request while the sequence is already running is consumed, not queued. */
-static void test_trig_while_busy_is_rejected(void)
-{
-    HDSDSetting.value = 1.0f;
     VSEL_PORT |= CAM_ON;
     State = TrigState;
-    menu_data[0] |= 0x02;
+    request_trig();
 
     TEST_ASSERT_EQUAL_INT(TRIG_NOTIDLE, TrigRequest());
-
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, menu_data[0] & 0x02,
         "the request is consumed even when it cannot be honoured");
 }
 
-
-/* ==========================================================================
- * HD mode - the query
- * ========================================================================== */
-
-static void test_hd_trig_transmits_the_query_and_waits(void)
+static void test_trig_while_ghosting_is_rejected(void)
 {
-    int q;
+    VSEL_PORT |= CAM_ON;
+    ghostState = 1;
+    request_trig();
 
-    arm_query();
-
-    q = query_index();
-    TEST_ASSERT_TRUE_MESSAGE(q >= 0, "HD trig should transmit a 0x521 query");
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(CAM_ADDR & 0xFF, can_tx_log[q].BUF[1],
-        "query carries the active camera address, low byte first");
-    TEST_ASSERT_EQUAL_HEX8((CAM_ADDR >> 8) & 0xFF, can_tx_log[q].BUF[2]);
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(NODE_ID, can_tx_log[q].BUF[3],
-        "query names this node so the camera can answer for it");
-    TEST_ASSERT_TRUE_MESSAGE(trig_query_sent, "the window should be armed");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "HD must NOT start the sequence until the camera answers");
-}
-
-static void test_hd_trig_consumes_the_request_bit(void)
-{
-    arm_query();
-
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, menu_data[0] & 0x02,
-        "the request is consumed so the query fires once, not every pass");
-}
-
-/* No camera has been addressed yet, so there is nobody to ask. Querying
- * address 0 would burn the full 5 s window waiting for an impossible answer. */
-static void test_hd_trig_does_not_query_without_an_active_camera(void)
-{
-    set_mco_time(T0);
-    HDSDSetting.value = HDSD_HD;
-    activeCamAddress = 0;
-    menu_data[0] |= 0x02;
-
-    TEST_ASSERT_EQUAL_INT(TRIG_NOCAM, TrigRequest());
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, can_tx_count, "nothing to query");
-    TEST_ASSERT_FALSE_MESSAGE(trig_query_sent, "no window should be armed");
+    TEST_ASSERT_EQUAL_INT(TRIG_NOTIDLE, TrigRequest());
     TEST_ASSERT_EQUAL_INT(FinishState, State);
 }
 
-/* An answer left over from a previous handshake must not satisfy the new one. */
-static void test_hd_trig_clears_a_stale_response_when_arming(void)
+/* The setting ranges 1..2; anything else must not fall through to INTERNAL. */
+static void test_trig_ignored_in_an_unknown_mode(void)
 {
-    answer_from(NODE_ID);
+    InternalExternalCameraSetting.value = 3.0f;
+    VSEL_PORT |= CAM_ON;
+    request_trig();
 
-    arm_query();
-
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, camera_cmds[0] & 0x20,
-        "arming drops any answer that predates the query");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "a stale answer must not start the sequence");
+    TEST_ASSERT_EQUAL_INT(TRIG_IDLE, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(FinishState, State);
 }
 
 
 /* ==========================================================================
- * HD mode - the response
+ * INTERNAL
  * ========================================================================== */
 
-static void test_response_for_this_node_starts_the_sequence(void)
+static void test_internal_trig_with_camera_on_starts_the_sequence(void)
 {
-    arm_query();
-    set_actuator_moving(1);
+    VSEL_PORT |= CAM_ON;
+    request_trig();
 
-    answer_from(NODE_ID);
-    TEST_ASSERT_EQUAL_INT(TRIG_STARTED, HDTrigQueryService());
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TrigState, State,
-        "the camera named us, so the coating sequence starts");
-    TEST_ASSERT_FALSE_MESSAGE(trig_query_sent, "the window should be closed");
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, camera_cmds[0] & 0x20,
-        "the response bit is consumed");
+    TEST_ASSERT_EQUAL_INT(TRIG_STARTED, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(TrigState, State);
+    TEST_ASSERT_EQUAL_UINT8(0, menu_data[0] & 0x02);
 }
 
-/* The query goes to the active camera, but 0x521 is a shared bus ID - the
- * answer has to be checked against NODE_ID or another coater's handshake would
- * start this unit's sequence. */
-static void test_response_for_another_node_is_ignored(void)
+static void test_internal_trig_with_camera_off_is_ignored_and_warns(void)
 {
-    arm_query();
+    request_trig();
 
-    answer_from(OTHER_NODE);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TRIG_WAITING, HDTrigQueryService(),
-        "not our answer, and the window has not closed - keep waiting");
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "an answer naming another coater must not start our sequence");
-    TEST_ASSERT_TRUE_MESSAGE(trig_query_sent,
-        "our window stays open - that answer was not for us");
+    TEST_ASSERT_EQUAL_INT(TRIG_IDLE, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(FinishState, State);
+    TEST_ASSERT_EQUAL_STRING("Warn:WRONG INT CAMERA", last_display_message());
 }
 
-static void test_response_while_ghosting_does_not_start_the_sequence(void)
+/* Pairing is an EXTERNAL concept; a mismatched pairing must not block INTERNAL. */
+static void test_internal_trig_ignores_pairing(void)
 {
-    arm_query();
-    ghostState = 1;
+    VSEL_PORT |= CAM_ON;
+    paired_camera_address = OTHER_ADDR;
+    activeCamAddress      = CAM_ADDR;
+    request_trig();
 
-    answer_from(NODE_ID);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TRIG_NOTIDLE, HDTrigQueryService(),
-        "the answer arrived, but a ghost band is running");
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "a ghost band is running; the trig must not cut in");
-    TEST_ASSERT_FALSE_MESSAGE(trig_query_sent, "the handshake still completes");
+    TEST_ASSERT_EQUAL_INT(TRIG_STARTED, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(TrigState, State);
 }
 
 
 /* ==========================================================================
- * HD mode - the timeout window
+ * EXTERNAL
  * ========================================================================== */
 
-static void test_window_stays_open_just_before_the_timeout(void)
+static void test_external_trig_starts_when_paired_camera_is_active(void)
 {
-    arm_query();
+    set_external();
+    paired_camera_address = CAM_ADDR;
+    activeCamAddress      = CAM_ADDR;
+    request_trig();
 
-    set_mco_time(T0 + 4999);
-    TEST_ASSERT_EQUAL_INT(TRIG_WAITING, HDTrigQueryService());
-
-    TEST_ASSERT_TRUE_MESSAGE(trig_query_sent, "4999 ms is inside the 5 s window");
+    TEST_ASSERT_EQUAL_INT(TRIG_STARTED, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(TrigState, State);
+    TEST_ASSERT_EQUAL_UINT8(0, menu_data[0] & 0x02);
 }
 
-static void test_window_closes_after_the_timeout(void)
+/* An HD camera is not powered from this unit, so CAM_ON is irrelevant. */
+static void test_external_trig_does_not_need_local_camera_power(void)
 {
-    arm_query();
+    set_external();
+    VSEL_PORT &= ~CAM_ON;
+    paired_camera_address = CAM_ADDR;
+    activeCamAddress      = CAM_ADDR;
+    request_trig();
 
-    set_mco_time(T0 + 5002);
-    TEST_ASSERT_EQUAL_INT(TRIG_TIMEDOUT, HDTrigQueryService());
-
-    TEST_ASSERT_FALSE_MESSAGE(trig_query_sent, "5 s elapsed: give up");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "a timeout leaves the state machine where it was");
+    TEST_ASSERT_EQUAL_INT(TRIG_STARTED, TrigRequest());
 }
 
-/* A late answer, arriving after the window closed, must be inert - the unit
- * already gave up, and the operator's trig request is gone. */
-static void test_answer_after_the_timeout_does_not_start_the_sequence(void)
+static void test_external_trig_ignored_when_paired_camera_is_not_active(void)
 {
-    arm_query();
-    set_mco_time(T0 + 5002);
-    HDTrigQueryService();
+    set_external();
+    paired_camera_address = CAM_ADDR;
+    activeCamAddress      = OTHER_ADDR;
+    request_trig();
 
-    answer_from(NODE_ID);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TRIG_IDLE, HDTrigQueryService(),
-        "nothing is armed any more, so there is nothing to resolve");
-
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
-        "the window is closed; a late answer is ignored");
+    TEST_ASSERT_EQUAL_INT(TRIG_IDLE, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(FinishState, State);
+    TEST_ASSERT_EQUAL_STRING("Warn:WRONG EXT CAM", last_display_message());
+    TEST_ASSERT_EQUAL_UINT8(0, menu_data[0] & 0x02);
 }
 
-/* REGRESSION: trig_query_timer must be 16-bit.
- *
- * It was `unsigned char`, so `MCOHW_GetTime() + 5000` was truncated to 8 bits
- * and compared against a full 16-bit clock - the window became arbitrary,
- * usually "already expired". Arming near the 16-bit wraparound is what makes
- * an 8-bit store unmistakable: 0xF000 + 5000 wraps to 0x0388, which a byte
- * cannot hold at all.
- */
-static void test_timeout_window_survives_the_16_bit_wraparound(void)
+static void test_external_trig_ignored_when_not_paired(void)
 {
-    set_mco_time(0xF000);
-    HDSDSetting.value = HDSD_HD;
-    State      = FinishState;
-    ghostState = 0;
+    set_external();
     activeCamAddress = CAM_ADDR;
-    menu_data[0] |= 0x02;
-    TrigRequest();
+    request_trig();
 
-    TEST_ASSERT_TRUE_MESSAGE(trig_query_sent, "armed at 0xF000");
+    TEST_ASSERT_EQUAL_INT(TRIG_IDLE, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(FinishState, State);
+    TEST_ASSERT_EQUAL_STRING("Warn:NO EXT CAM PAIRED", last_display_message());
+}
 
-    set_mco_time((UNSIGNED16)(0xF000 + 4000));      /* wraps past 0xFFFF */
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TRIG_WAITING, HDTrigQueryService(),
-        "4000 ms after arming is still inside the window, across the wrap");
+/* REGRESSION: both start at 0 on boot, and 0 == 0 used to trigger unpaired. */
+static void test_external_trig_ignored_at_boot_with_nothing_paired_or_active(void)
+{
+    set_external();
+    request_trig();
 
-    set_mco_time((UNSIGNED16)(0xF000 + 5002));
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TRIG_TIMEDOUT, HDTrigQueryService(),
-        "5 s after arming the window closes, across the wrap");
+    TEST_ASSERT_EQUAL_INT(TRIG_IDLE, TrigRequest());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State,
+        "unpaired 0 must not match an unset active address of 0");
 }
 
 
 /* ==========================================================================
- * Full path through doevents()
+ * Pairing - poll_paired_camera_address
  * ========================================================================== */
 
-static void test_hd_handshake_end_to_end_through_doevents(void)
+static void test_pairing_for_this_node_latches_the_address(void)
 {
-    set_mco_time(T0);
-    HDSDSetting.value = HDSD_HD;
-    activeCamAddress = CAM_ADDR;
-    State      = FinishState;
-    ghostState = 0;
-    set_actuator_moving(1);
-    can_tx_reset();
+    pairing_from(NODE_ID, CAM_ADDR);
 
-    menu_data[0] |= 0x02;
-    doevents();
-    TEST_ASSERT_TRUE_MESSAGE(trig_query_sent, "doevents should arm the query");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(FinishState, State, "still waiting");
-
-    answer_from(NODE_ID);
-    doevents();
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TrigState, State,
-        "the answer starts the coating sequence on the next pass");
+    TEST_ASSERT_EQUAL_INT(1, poll_paired_camera_address());
+    TEST_ASSERT_EQUAL_HEX16(CAM_ADDR, paired_camera_address);
 }
 
-/* The old code chained the response/timeout checks onto `else if` of the
- * request bit, so neither ran on a pass where a fresh request arrived. */
-static void test_service_runs_on_a_pass_that_also_carries_a_request(void)
+static void test_pairing_assembles_the_address_low_byte_first(void)
 {
-    arm_query();
+    memset(pairing_msg, 0, 8);
+    pairing_msg[0] = NODE_ID;
+    pairing_msg[1] = 0x42;      /* LSB */
+    pairing_msg[2] = 0x19;      /* MSB */
 
-    answer_from(NODE_ID);
-    set_actuator_moving(1);
-    menu_data[0] |= 0x02;       /* a new request lands in the same pass */
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TRIG_STARTED, TrigRequest(),
-        "the handshake outcome wins over the request that raced it");
+    poll_paired_camera_address();
 
-    TEST_ASSERT_EQUAL_INT_MESSAGE(TrigState, State,
-        "the answer must still be serviced on a pass carrying a request");
+    TEST_ASSERT_EQUAL_HEX16(0x1942, paired_camera_address);
+}
+
+/* Once consumed, the stale bytes must not be read as a new message. */
+static void test_pairing_consumes_the_message(void)
+{
+    unsigned i;
+    pairing_from(NODE_ID, CAM_ADDR);
+    pairing_msg[3] = 0x01;      /* camera type / tag bytes */
+    pairing_msg[7] = 0x7A;
+
+    poll_paired_camera_address();
+
+    for (i = 0; i < 8; i++)
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, pairing_msg[i], "all 8 bytes cleared");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, poll_paired_camera_address(),
+        "a cleared message is not a new pairing");
+    TEST_ASSERT_EQUAL_HEX16(CAM_ADDR, paired_camera_address);
+}
+
+/* 0x321 is a shared bus ID: another coater's pairing must not hijack ours. */
+static void test_pairing_for_another_node_is_ignored(void)
+{
+    paired_camera_address = CAM_ADDR;
+    pairing_from(OTHER_NODE, OTHER_ADDR);
+
+    TEST_ASSERT_EQUAL_INT(0, poll_paired_camera_address());
+    TEST_ASSERT_EQUAL_HEX16(CAM_ADDR, paired_camera_address);
+}
+
+static void test_pairing_with_a_zero_address_is_ignored(void)
+{
+    paired_camera_address = CAM_ADDR;
+    pairing_from(NODE_ID, 0);
+
+    TEST_ASSERT_EQUAL_INT(0, poll_paired_camera_address());
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM_ADDR, paired_camera_address,
+        "address 0 would leave the unit unpaired");
+}
+
+static void test_pairing_with_the_same_address_is_not_a_change(void)
+{
+    paired_camera_address = CAM_ADDR;
+    pairing_from(NODE_ID, CAM_ADDR);
+
+    TEST_ASSERT_EQUAL_INT(0, poll_paired_camera_address());
+    TEST_ASSERT_EQUAL_HEX16(CAM_ADDR, paired_camera_address);
+}
+
+static void test_pairing_to_a_new_camera_replaces_the_old_one(void)
+{
+    paired_camera_address = CAM_ADDR;
+    pairing_from(NODE_ID, OTHER_ADDR);
+
+    TEST_ASSERT_EQUAL_INT(1, poll_paired_camera_address());
+    TEST_ASSERT_EQUAL_HEX16(OTHER_ADDR, paired_camera_address);
+}
+
+/* Our camera announcing it now belongs to another node is a stale pairing. */
+static void test_pairing_released_when_our_camera_pairs_to_another_node(void)
+{
+    paired_camera_address = CAM_ADDR;
+    pairing_from(OTHER_NODE, CAM_ADDR);
+
+    TEST_ASSERT_EQUAL_INT(1, poll_paired_camera_address());
+    TEST_ASSERT_EQUAL_HEX16(0, paired_camera_address);
+}
+
+static void test_external_trig_after_release_warns_not_paired(void)
+{
+    set_external();
+    paired_camera_address = CAM_ADDR;
+    activeCamAddress      = CAM_ADDR;
+    pairing_from(OTHER_NODE, CAM_ADDR);
+    poll_paired_camera_address();
+    request_trig();
+
+    TEST_ASSERT_EQUAL_INT(TRIG_IDLE, TrigRequest());
+    TEST_ASSERT_EQUAL_INT(FinishState, State);
+    TEST_ASSERT_EQUAL_STRING("Warn:NO EXT CAM PAIRED", last_display_message());
+}
+
+static void test_pairing_for_another_node_is_consumed(void)
+{
+    pairing_from(OTHER_NODE, OTHER_ADDR);
+
+    poll_paired_camera_address();
+
+    TEST_ASSERT_EQUAL_UINT8(0, pairing_msg[0]);
+}
+
+
+/* ==========================================================================
+ * End to end: 0x321 on the bus through RPDO8 and doevents()
+ * ========================================================================== */
+
+/* Runs passes until the injected frame has been mapped and polled. The first
+ * MCO_ProcessStack pass after bring-up sends boot-up and reads nothing. */
+static void run_passes(int n)
+{
+    while (n--)
+        doevents();
+}
+
+static void test_rpdo8_frame_pairs_the_unit(void)
+{
+    UNSIGNED8 frame[8] = { NODE_ID, CAM_ADDR & 0xFF, (CAM_ADDR >> 8) & 0xFF,
+                           0x01, 'A', 'B', 'C', 'D' };
+
+    can_rx_inject(0x321, frame, 8);
+    run_passes(3);
+
+    TEST_ASSERT_EQUAL_HEX16_MESSAGE(CAM_ADDR, paired_camera_address,
+        "0x321 must land in pairing_msg and be latched");
+}
+
+/* RPDO8 is 8 bytes; mapped anywhere else it would overwrite neighbours such as
+ * the menu/trig byte. */
+static void test_rpdo8_frame_does_not_touch_the_trig_byte(void)
+{
+    UNSIGNED8 frame[8] = { OTHER_NODE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+    can_rx_inject(0x321, frame, 8);
+    run_passes(3);
+
+    TEST_ASSERT_EQUAL_UINT8(0, menu_data[0]);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, pairing_msg[0],
+        "every 321 is consumed, even one for another node");
+}
+
+/* Camera re-paired to another coater on the bus: this unit must let go. */
+static void test_rpdo8_frame_for_another_node_releases_our_camera(void)
+{
+    UNSIGNED8 frame[8] = { OTHER_NODE, CAM_ADDR & 0xFF, (CAM_ADDR >> 8) & 0xFF,
+                           0, 0, 0, 0, 0 };
+
+    paired_camera_address = CAM_ADDR;
+    can_rx_inject(0x321, frame, 8);
+    run_passes(3);
+
+    TEST_ASSERT_EQUAL_HEX16(0, paired_camera_address);
+}
+
+static void test_external_pair_select_and_trig_through_doevents(void)
+{
+    UNSIGNED8 frame[8] = { NODE_ID, CAM_ADDR & 0xFF, (CAM_ADDR >> 8) & 0xFF,
+                           0, 0, 0, 0, 0 };
+
+    set_external();
+    set_actuator_moving(1);     /* park in TrigState instead of advancing */
+
+    can_rx_inject(0x321, frame, 8);
+    run_passes(3);
+
+    camera_addr[0] = CAM_ADDR & 0xFF;   /* 0x421 select of the HD camera */
+    camera_addr[1] = (CAM_ADDR >> 8) & 0xFF;
+    doevents();
+    TEST_ASSERT_EQUAL_HEX16(CAM_ADDR, activeCamAddress);
+
+    request_trig();
+    doevents();
+    TEST_ASSERT_EQUAL_INT(TrigState, State);
 }
 
 
@@ -402,30 +418,39 @@ int main(void)
 {
     UNITY_BEGIN();
 
-    RUN_TEST(test_hdsd_mode_reads_whole_numbers);
-    RUN_TEST(test_hdsd_mode_rounds_a_drifted_float);
+    RUN_TEST(test_internal_external_reads_whole_numbers);
+    RUN_TEST(test_internal_external_rounds_a_drifted_float);
 
-    RUN_TEST(test_sd_trig_starts_the_sequence_without_a_query);
-    RUN_TEST(test_sd_trig_ignored_with_no_camera_on);
-    RUN_TEST(test_trig_ignored_in_a_mode_with_no_trig_path);
-    RUN_TEST(test_trig_while_busy_is_rejected);
+    RUN_TEST(test_no_request_does_nothing);
+    RUN_TEST(test_trig_while_coating_is_rejected_and_consumed);
+    RUN_TEST(test_trig_while_ghosting_is_rejected);
+    RUN_TEST(test_trig_ignored_in_an_unknown_mode);
 
-    RUN_TEST(test_hd_trig_transmits_the_query_and_waits);
-    RUN_TEST(test_hd_trig_consumes_the_request_bit);
-    RUN_TEST(test_hd_trig_does_not_query_without_an_active_camera);
-    RUN_TEST(test_hd_trig_clears_a_stale_response_when_arming);
+    RUN_TEST(test_internal_trig_with_camera_on_starts_the_sequence);
+    RUN_TEST(test_internal_trig_with_camera_off_is_ignored_and_warns);
+    RUN_TEST(test_internal_trig_ignores_pairing);
 
-    RUN_TEST(test_response_for_this_node_starts_the_sequence);
-    RUN_TEST(test_response_for_another_node_is_ignored);
-    RUN_TEST(test_response_while_ghosting_does_not_start_the_sequence);
+    RUN_TEST(test_external_trig_starts_when_paired_camera_is_active);
+    RUN_TEST(test_external_trig_does_not_need_local_camera_power);
+    RUN_TEST(test_external_trig_ignored_when_paired_camera_is_not_active);
+    RUN_TEST(test_external_trig_ignored_when_not_paired);
+    RUN_TEST(test_external_trig_ignored_at_boot_with_nothing_paired_or_active);
 
-    RUN_TEST(test_window_stays_open_just_before_the_timeout);
-    RUN_TEST(test_window_closes_after_the_timeout);
-    RUN_TEST(test_answer_after_the_timeout_does_not_start_the_sequence);
-    RUN_TEST(test_timeout_window_survives_the_16_bit_wraparound);
+    RUN_TEST(test_pairing_for_this_node_latches_the_address);
+    RUN_TEST(test_pairing_assembles_the_address_low_byte_first);
+    RUN_TEST(test_pairing_consumes_the_message);
+    RUN_TEST(test_pairing_for_another_node_is_ignored);
+    RUN_TEST(test_pairing_with_a_zero_address_is_ignored);
+    RUN_TEST(test_pairing_with_the_same_address_is_not_a_change);
+    RUN_TEST(test_pairing_to_a_new_camera_replaces_the_old_one);
+    RUN_TEST(test_pairing_released_when_our_camera_pairs_to_another_node);
+    RUN_TEST(test_external_trig_after_release_warns_not_paired);
+    RUN_TEST(test_pairing_for_another_node_is_consumed);
 
-    RUN_TEST(test_hd_handshake_end_to_end_through_doevents);
-    RUN_TEST(test_service_runs_on_a_pass_that_also_carries_a_request);
+    RUN_TEST(test_rpdo8_frame_pairs_the_unit);
+    RUN_TEST(test_rpdo8_frame_does_not_touch_the_trig_byte);
+    RUN_TEST(test_rpdo8_frame_for_another_node_releases_our_camera);
+    RUN_TEST(test_external_pair_select_and_trig_through_doevents);
 
     return UNITY_END();
 }

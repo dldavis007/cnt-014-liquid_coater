@@ -1,7 +1,7 @@
 #ifndef Subroutines_H
 #define Subroutines_H
 
-#define Revision "4.33"
+#define Revision "4.34"
 
 
 //#pragma paged_function InitPorts InitInterrupts InitPLL InitSCI InitSPI
@@ -23,7 +23,9 @@
 //ResetProc
 
 
-extern struct menu_var HDSDSetting;
+extern struct menu_var InternalExternalCameraSetting;
+extern struct menu_var Cam1Enable;
+extern struct menu_var Cam2Enable;
 #define STR_VALUE_LEN 12
 
 struct menu_var{
@@ -239,7 +241,7 @@ struct menu_var *VarPntr[11];
 int (*FunctPtr[11])( void );
 };
 
-extern struct MenuStruct Menuc[];
+extern const struct MenuStruct Menuc[];
 
 typedef struct MenuStack 
 {

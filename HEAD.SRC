@@ -20,6 +20,7 @@ Source_Files\mco.h
 Source_Files\Interrupts.h
 Source_Files\Subroutines.h
 Source_Files\Subroutines1.h
+pc_side\pc_log.h
 [Documents]
 Document_Files\Things To Do.txt
 Document_Files\MCO Reference.txt

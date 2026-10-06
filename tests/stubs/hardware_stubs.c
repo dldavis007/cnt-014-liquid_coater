@@ -239,12 +239,14 @@ void set_la_commanded_pos(int tenths){ gProcImg[IN_digi_12] = (UNSIGNED8)tenths;
 UNSIGNED8 *menu_data   = NULL;
 UNSIGNED8 *camera_addr = NULL;
 UNSIGNED8 *camera_cmds = NULL;
+UNSIGNED8 *pairing_msg = NULL;
 
 static void bind_signal_blocks(void)
 {
     menu_data   = &gProcImg[OUT_digi_0];
     camera_addr = &gProcImg[OUT_digi_8];
     camera_cmds = &gProcImg[OUT_digi_10];
+    pairing_msg = &gProcImg[OUT_digi_16];
 }
 
 /* Menu-variable setters (see test_support.h): the firmware's own idiom, as

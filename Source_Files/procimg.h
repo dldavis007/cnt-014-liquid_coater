@@ -27,7 +27,7 @@ Modify these for your application
 **************************************************************************/
 
 // Define the size of the process image
-#define PROCIMG_SIZE 55
+#define PROCIMG_SIZE 63
 
 // Define process variables: offsets into the process image 
 // Menu Control
@@ -127,15 +127,24 @@ Modify these for your application
 //
 #define OUT_digi_15 48
 
+// pairing message from hd cameras
+#define OUT_digi_16 49 // trigger id
+#define OUT_digi_17 50 // camera id lsb
+#define OUT_digi_18 51 // camera id msb
+#define OUT_digi_19 52 // camera type
+#define OUT_digi_20 53 // camera tag [0]
+#define OUT_digi_21 54 // camera tag [1]
+#define OUT_digi_22 55 // camera tag [2]
+#define OUT_digi_23 56 // camera tag [3]
 
 
 
 // Temperature Base
-#define OUT_ana_0 49
+#define OUT_ana_0 57
 // Temperature ISO
-#define OUT_ana_1 51
+#define OUT_ana_1 59
 // Temperature Hose
-#define OUT_ana_2 53
+#define OUT_ana_2 61
 
 
 #endif

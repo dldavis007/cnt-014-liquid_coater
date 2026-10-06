@@ -1,5 +1,5 @@
 [Compiler Options]
-Edit1=C:\iccv712\include\
+Edit1=C:\iccv712\include\;..\pc_side
 Edit2=C:\iccv712\lib\
 Edit8=.\Build\
 CheckBox1=0
@@ -99,4 +99,4 @@ CheckBox25=0
 RadioGroup11=0
 XMMCheckBox=0
 _430XCheckBox=0
-BuildNumber=1604
+BuildNumber=1605

@@ -81,10 +81,12 @@ void set_la_commanded_pos(int tenths);
  *   menu_data    -> gProcImg[OUT_digi_0]   (1 byte in production 4.33; 8 in the refactored 4.33 / 4.34 rpdo1_menu_data)
  *   camera_addr  -> gProcImg[OUT_digi_8]   (2 bytes)  == 4.34 rpdo5_camera_addr
  *   camera_cmds  -> gProcImg[OUT_digi_10]  (5 bytes)  == 4.34 rpdo6_camera_cmds
+ *   pairing_msg  -> gProcImg[OUT_digi_16]  (8 bytes)  RPDO8 0x321 hd camera pairing
  */
 extern UNSIGNED8 *menu_data;
 extern UNSIGNED8 *camera_addr;
 extern UNSIGNED8 *camera_cmds;
+extern UNSIGNED8 *pairing_msg;
 
 /* The shared fixture for every coating-sequence suite: runs the bring-up once,
  * quiets every input that could move the state machine on its own, resets the
