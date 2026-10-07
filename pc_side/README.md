@@ -17,7 +17,7 @@ executable, with live logging and a UDP CAN bus. Built by GCC with
 - `Makefile`: this unit's firmware sources and `-D` flags, then
   `include core/core.mk`.
 
-`core/` will become a git submodule. Clone with
+`core/` is a git submodule (`pc_side_core`). Clone with
 `git clone --recurse-submodules <url>`. If `core/` comes up empty, run
 `git submodule update --init`.
 
