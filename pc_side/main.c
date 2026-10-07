@@ -202,7 +202,8 @@ int main(int argc, char **argv)
     pc_side_watchdog_start();
 
     /* Controller.c's order. After the stall detector, so a ResetProc from a
-     * corrupt image is caught and relaunched. */
+     * corrupt image is caught and relaunched.
+     * TODO: build-time check that this call list matches Controller.c main(). */
     Load_Camera_Add();
     Load_Serial_Num();
     Load_Variables();
