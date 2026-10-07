@@ -1,37 +1,14 @@
 #ifndef TEST_SUPPORT_H
 #define TEST_SUPPORT_H
 
-/* Host-side test controls implemented in stubs/hardware_stubs.c. */
+/* The 12/48 Coater's test fixtures (test_support.c). The shared controls - CAN
+ * capture/inject, RTI and pacing threads, MCO time, EEPROM - are in test_hw.h. */
 
-#include "nodecfg.h"
-#include "mco.h"
-
-/* Captured CAN transmissions (what the firmware pushed). */
-#define CAN_TX_LOG_N 64
-extern CAN_MSG  can_tx_log[CAN_TX_LOG_N];
-extern unsigned can_tx_count;
-void can_tx_reset(void);
-
-/* Injected CAN receptions; the firmware pulls these on its next stack pass. */
-void can_rx_inject(UNSIGNED16 id, const UNSIGNED8 *data, UNSIGNED8 len);
-void can_rx_reset(void);
+#include "test_hw.h"
 
 /* Runs the real firmware bring-up once (ports, interrupts, CANopen), and starts
  * the Timer1 pacing service described below. Idempotent — call it from setUp(). */
 void host_firmware_init(void);
-
-/* MCO millisecond time base. Off by default: MCOHW_IsTimeExpired() returns 1
- * unconditionally so pacing code falls through. set_mco_time() opts in and
- * makes GetTime/IsTimeExpired behave like the target's, for timeout tests. */
-void set_mco_time(UNSIGNED16 ms);
-void clear_mco_time(void);
-
-/* RTI simulation. Deterministic mode: advance_ticks(N) fires exactly N ISRs. */
-void rti_thread_start(void);
-void rti_thread_start_realtime(unsigned int period_ms);
-void rti_thread_stop(void);
-void advance_ticks(unsigned int n);
-unsigned int rti_ticks(void);
 
 /* ---------------------------------------------------------------------------
  * Timer1 pacing service — Rev4.33 only.
@@ -43,7 +20,7 @@ unsigned int rti_ticks(void);
  * in Display() and PositionDisplay(). Timer1 is
  * decremented ONLY by RTI_Int_Handler(), so on the host those spins never end
  * and the first Display() in the coating sequence hangs the suite. (Rev4.34
- * paces with MCOHW_GetTime instead, which the stubs below pin to "always
+ * paces with MCOHW_GetTime instead, which test_hw.c pins to "always
  * expired", so it never had this problem.)
  *
  * We do NOT solve it by #ifdef'ing the waits out of the firmware — the pacing
@@ -53,11 +30,9 @@ unsigned int rti_ticks(void);
  * the full RTI ISR here would advance StateTime by ~100 ticks per Display()
  * call and make every timeout assertion racy.
  *
- * Started automatically by host_firmware_init(); the controls are exposed for
- * a test that wants to observe the spin itself.
+ * Started automatically by host_firmware_init(); pacing_thread_start/stop()
+ * (test_hw.h) are exposed for a test that wants to observe the spin itself.
  * ------------------------------------------------------------------------- */
-void pacing_thread_start(void);
-void pacing_thread_stop(void);
 
 /* ---------------------------------------------------------------------------
  * Revision-agnostic accessors for the signals the coating sequence reads.

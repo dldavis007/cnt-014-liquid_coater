@@ -2,7 +2,9 @@
 
 Host-compiled (TDM-GCC / MinGW-w64) tests that run the **real** production
 Rev 4.33 sources from the project root, unmodified apart from the `PC_SIDE`
-guards. `stubs/hardware_stubs.c` supplies only the hardware layer underneath.
+guards. The hardware layer underneath and the build are shared from
+`pc_side/core/test/` (`test_hw.c`, `test.mk`, Unity); this unit's fixtures are
+`test_support.c/.h`.
 The suites were carried over from `CRTS_Refactored`'s Rev4.33 (a later,
 unreleased revision; see `../README.md`) and adapted where production behaves
 differently.
@@ -31,12 +33,12 @@ mingw32-make clean
 Compiled: `Subroutines.c`, `Subroutines1.c`, `mco.c`, `user.c`, `Interrupts.c`.
 There is no `MenuSerialize.c` or `Packets.c` in production 4.33.
 
-Stubbed in `hardware_stubs.c`:
+Not compiled:
 
 | File | Why |
 |---|---|
 | `Controller.c` | Holds `main()` and the hardware bring-up; `host_firmware_init()` mirrors its init order |
-| `EEProm.c`, `Flash.c` | Absolute-address access, and they spin on command-complete bits |
+| `EEProm.c`, `Flash.c` | Spin on command-complete bits; `test_hw.c` keeps the EEPROM image in RAM |
 | `mcohw.c` | Spins on CAN transmit-buffer status bits that never set |
 | `Command.c` | Serial console, reached only from the SCI ISRs |
 
@@ -73,7 +75,7 @@ Each is a real difference in behaviour, asserted as production does it:
 ## The revision-agnostic seam
 
 Suites never name a revision's own signal variables; they go through
-`stubs/test_support.h`:
+`test_support.h`:
 
 | Accessor | Rev 4.33 | Rev4.34 |
 |---|---|---|

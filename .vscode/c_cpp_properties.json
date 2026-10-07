@@ -13,7 +13,9 @@
             "includePath": [
                 "${workspaceFolder}/Source_Files",
                 "${workspaceFolder}/pc_side/core",
-                "${workspaceFolder}/tests/stubs"
+                "${workspaceFolder}/tests",
+                "${workspaceFolder}/pc_side/core/test",
+                "${workspaceFolder}/pc_side/core/test/unity"
             ],
             "defines": [
                 "PC_SIDE",
