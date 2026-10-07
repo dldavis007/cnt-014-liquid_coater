@@ -1,0 +1,3 @@
+[submodule "pc_side/core"]
+	path = pc_side/core
+	url = ../pc_side_core.git
