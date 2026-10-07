@@ -81,7 +81,7 @@ Address							Module							(Bytes)Size
 
 #ifdef PC_SIDE
 /* Host build (GCC): SFRs are not memory-mapped at 0 on a PC. Point _REG_BASE at
- * a plain byte array (defined in pc_side_host.c / hardware_stubs.c) so every
+ * a plain byte array (defined in pc_side/core/host_runtime.c / hardware_stubs.c) so every
  * register macro below compiles and runs unchanged. */
 extern unsigned char sfr_regs[0x400];
 #define _REG_BASE        sfr_regs

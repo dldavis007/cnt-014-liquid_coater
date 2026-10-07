@@ -66,7 +66,7 @@ void RTI_Int_Handler(void);   /* production ISR in ../Interrupts.c */
  * ========================================================================== */
 unsigned char sfr_regs[0x400];   /* replaces the SFRs memory-mapped near 0 */
 
-/* The production sources may carry PC_SIDE tracing (pc_side/pc_log.h). Route it
+/* The production sources may carry PC_SIDE tracing (pc_side/core/pc_log.h). Route it
  * to nothing by default - a suite printing firmware trace lines would bury the
  * Unity output. Set trace_to_stdout = 1 in a test to see it. */
 int trace_to_stdout = 0;

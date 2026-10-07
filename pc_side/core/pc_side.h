@@ -27,4 +27,9 @@ extern volatile int g_intr_masked;      /* 1 = interrupts masked (reset state) *
 #define INTR_OFF()  (g_intr_masked = 1)
 #endif
 
+/* Host EEPROM image (host_eeprom.c). A unit's EEProm.h points EE_begin here
+ * under PC_EEPROM: #define EE_begin ((int)pc_eeprom) */
+#define EE_size 0x0800
+extern unsigned char pc_eeprom[EE_size];
+
 #endif  /* PC_SIDE_H */

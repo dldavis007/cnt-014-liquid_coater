@@ -2,7 +2,24 @@
 
 Runs the **real** production Rev 4.33 firmware loop (`doevents()`) as a Windows
 executable, with live logging and a UDP CAN bus. Built by GCC with
-`-DPC_SIDE`; ImageCraft never sees `main.c` or `pc_side_host.c`.
+`-DPC_SIDE`; ImageCraft never sees anything in this folder.
+
+## Layout
+
+- `core/`: the host shared by every HCS12 + MicroCANopen unit. It covers the
+  UDP CAN bus and `MCOHW_*` layer, the RTI thread, the EEPROM image, the stall
+  detector and reset relaunch, the `--hw-*` options and the shared `core.mk`
+  build. Change it there, not per unit. The API is in `core/pc_core.h`.
+- `main.c`: this unit's part. It holds the `pc_side_unit` settings (ports, RTI
+  handler, `COPCTL`/`CANRFLG`, transmit timeout), the init order mirroring
+  `Controller.c`, test
+  seeds and logging.
+- `Makefile`: this unit's firmware sources and `-D` flags, then
+  `include core/core.mk`.
+
+`core/` will become a git submodule. Clone with
+`git clone --recurse-submodules <url>`. If `core/` comes up empty, run
+`git submodule update --init`.
 
 ## Running
 
@@ -23,22 +40,26 @@ skip the prompts (`pc_side_host.exe 20010 20100`).
 ## How it maps onto the target
 
 `main.c` mirrors `Controller.c`'s `main()`: `InitPorts()`, `InitInterrupts()`,
-`EEInit()`, `INTR_ON()`, `InitCANOpen()`, then the `while(1) { doevents(); }`
-loop. `doevents()` has no internal loop in 4.33, so the loop lives in the host's
-`main()`, exactly as on the target.
+`EEInit()`, `INTR_ON()`, the EEPROM loads, `InitCANOpen()`, then the
+`while(1) { doevents(); }` loop. `doevents()` has no internal loop in 4.33, so
+the loop lives in the host's `main()`, exactly as on the target.
 
-Skipped:
+Skipped: `InitPLL()`, `PWMInit()` and `AtoDInit()`, which spin on status bits.
 
-- `InitPLL()`, `PWMInit()` and `AtoDInit()`, which spin on status bits.
-- The EEPROM loads, which use absolute addresses. The unit comes up on its
-  compiled-in defaults.
+## EEPROM
+
+`-DPC_EEPROM` points `EE_begin` at a 2 KB host array, saved to `eeprom.bin` in
+the working directory on every `EEWrite`. The firmware's own `Load_Variables`,
+`Save_Variables` and `RestoreDefaults` run unchanged. With no file, the array
+starts erased (`0xFF`), so the first boot saves the compiled-in defaults.
+Delete `eeprom.bin` to start fresh.
 
 Compiled: `Subroutines.c`, `Subroutines1.c`, `mco.c`, `user.c`, `Interrupts.c`,
 all from the project root.
 
 ## The RTI simulation thread
 
-`pc_side_host.c` drives the production `RTI_Int_Handler()` at `RTI_One_Sec`,
+`core/host_rti.c` drives the production `RTI_Int_Handler()` at `RTI_One_Sec`,
 counting ticks from `QueryPerformanceCounter`. It is **load-bearing**:
 `Display()` and `PositionDisplay()` pace their CAN frames with
 `Timer1 = n; while (Timer1);`, and `Timer1` only moves under the RTI ISR. Ticks

@@ -12,7 +12,7 @@
             "cStandard": "c11",
             "includePath": [
                 "${workspaceFolder}/Source_Files",
-                "${workspaceFolder}/pc_side",
+                "${workspaceFolder}/pc_side/core",
                 "${workspaceFolder}/tests/stubs"
             ],
             "defines": [
@@ -21,7 +21,7 @@
                 "diag"
             ],
             "forcedInclude": [
-                "${workspaceFolder}/pc_side/pc_side.h"
+                "${workspaceFolder}/pc_side/core/pc_side.h"
             ]
         },
         {

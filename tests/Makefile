@@ -71,8 +71,8 @@ TEST_CFLAGS := -Wall -Wno-unknown-pragmas -g -std=c11 -m32 -funsigned-char \
                -malign-data=abi -ffunction-sections -MMD -MP \
                -DPC_SIDE -DSKIP_EEPROM_LOAD -Ddiag -DUNITY_INCLUDE_DOUBLE
 
-INCS    := -I$(SRC) -Istubs -Iunity -I../pc_side
-FINC    := -include ../pc_side/pc_side.h
+INCS    := -I$(SRC) -Istubs -Iunity -I../pc_side/core
+FINC    := -include ../pc_side/core/pc_side.h
 LDFLAGS := -m32 -Wl,--gc-sections -Wl,--allow-multiple-definition
 
 BUILD   := build

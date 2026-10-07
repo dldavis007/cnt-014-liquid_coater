@@ -4,10 +4,14 @@
  * a UDP CAN bus, so the logic can be driven and observed without the HCS12 or
  * NOICE. Compiled by GCC with -DPC_SIDE; ImageCraft never sees this file.
  *
+ * This file is the unit-specific part: init order, test seeds and logging. The
+ * shared host (CAN bus, RTI thread, EEPROM image, stall detector, reset,
+ * --hw-* options) is pc_side/core - see pc_core.h.
+ *
  * Init mirrors Controller.c's main() minus the hardware bring-up
  * (InitPLL, PWMInit, AtoDInit): those busy-wait on status bits that never
- * change on a PC. The EEPROM is a host image persisted to eeprom.bin
- * (pc_side_host.c), so the EEPROM loads run unchanged.
+ * change on a PC. The EEPROM is a host image persisted to eeprom.bin, so the
+ * EEPROM loads run unchanged.
  *
  * Note Rev4.33's doevents() has NO internal loop — Controller.c's main() calls
  * it from a while(1), so the loop lives here, exactly as on the target.
@@ -15,40 +19,21 @@
  * Usage:  pc_side_host.exe [recv_port] [send_port] [--hw-...]   (prompts if ports omitted)
  *         Defaults 20010 / 20100 = bind :20010, send to the shared
  *         can_udp_hub.py bus on :20100 alongside the other emulated nodes.
- *         Hardware fidelity (on by default at the target's values, see
- *         pc_side_host.c; --no-hw turns it all off):
- *           --hw-rx-fifo=N        hold N received frames, drop the rest (5; 0 = off)
- *           --hw-can-filters=0|1  apply the MSCAN acceptance filters (1)
- *           --hw-ee-erase-ms=N    EEPROM writes block N ms per 4-byte sector (20; 0 = off)
- *           --hw-can-tx=0|1       each transmit blocks for its 125 kbit/s bus time (1)
+ *         --hw-* options: see pc_side_begin() in core/host_runtime.c.
  *         Start the bus first:  python can_hub_gui.py  (C:\Working_Projects\can_emulators)
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <signal.h>
-
-/* Trim the Win32 headers: winuser.h's A/W macros (LoadMenu->LoadMenuA, ...)
- * collide with firmware symbol names. We only need Sleep()/threads here. */
-#define WIN32_LEAN_AND_MEAN
-#define NOGDI
-#define NOUSER
-#define NOMINMAX
-#include <errno.h>
-#include <windows.h>
-
-#undef TRUE
-#undef FALSE
 
 #include "nodecfg.h"
 #include "mco.h"
 #include "mcohw.h"
-#include "mc9s12a128.h"       /* PORTA, behind VSEL_PORT */
+#include "mc9s12a128.h"       /* COPCTL, CANRFLG; PORTA, behind VSEL_PORT */
 #include "Controller.h"
 #include "Subroutines.h"
 #include "Subroutines1.h"
-#include "Interrupts.h"       /* RTI_One_Sec */
+#include "Interrupts.h"       /* RTI_One_Sec, Gen_Flags_No2Wire */
+#include "pc_core.h"
 #include "pc_log.h"
 
 /* Defined in the firmware TUs but not declared in any header.
@@ -60,97 +45,11 @@ extern char      ghostState;
 extern unsigned  cam_add1;
 extern unsigned  cam_add2;
 extern struct menu_var NullVar;
+extern unsigned int Timer1;
+extern char      Gen_Flags;
 
-void EEInit(void);          /* pc_side_host.c (EEProm.c not compiled) */
-
-/* pc_side_host.c entry points. */
-int  pc_side_can_init(unsigned short recv_port, unsigned short send_port);
-void pc_side_can_shutdown(void);
-void rti_thread_start_realtime(unsigned int period_ms);
-void rti_thread_stop(void);
-void pc_side_reset(void);
-unsigned int pc_side_rti_ticks(void);
-unsigned int pc_side_rti_skipped(void);
-int  pc_side_hw_option(const char *arg);
-void pc_side_hw_log(void);
-
-static const char *coat_state_name(int s);        /* defined below */
-
-static volatile int           g_running    = 1;
-static volatile unsigned long g_loop_count = 0;   /* completed doevents() passes */
-
-static void on_sigint(int sig) { (void)sig; g_running = 0; }
-
-/* Host diagnostic heartbeat, reported through the CONSOLE TITLE BAR
- * (SetConsoleTitle is a kernel32 call, NOT stdout) so it keeps updating even
- * when the terminal has blocked our stdout. That separates the two freeze modes
- * we otherwise cannot tell apart:
- *   - title 'loop=' climbs while the log is frozen -> firmware is ALIVE, only
- *     the terminal is stuck
- *   - title 'loop=' also stops -> doevents() is genuinely HUNG (the state shown
- *     in the title says where).
- * Also reports the RTI rate: rate < 1.0 means every timed operation runs long
- * by 1/rate, e.g. a 20 s purge timeout at 0.65 really takes ~31 s. On Rev4.33 a
- * collapsing rate is doubly serious — Display()'s `while (Timer1)` spins only
- * end because this thread ticks. */
-static DWORD WINAPI loop_watchdog_fn(void *arg)
-{
-    unsigned long last = 0;
-    int    stalled_secs = 0;
-    char   title[220];
-    unsigned int last_ticks = 0, last_skips = 0;
-    DWORD  last_ms = GetTickCount();
-    (void)arg;
-
-    while (g_running) {
-        unsigned int ticks, skips;
-        DWORD  now;
-        double rate, real_hz;
-
-        Sleep(1000);
-        stalled_secs = (g_loop_count == last) ? stalled_secs + 1 : 0;
-
-        ticks   = pc_side_rti_ticks();
-        skips   = pc_side_rti_skipped();
-        now     = GetTickCount();
-        real_hz = (now > last_ms)
-                ? (double)(ticks - last_ticks) * 1000.0 / (double)(now - last_ms)
-                : 0.0;
-        rate    = real_hz / (double)RTI_One_Sec;
-
-        snprintf(title, sizeof title,
-                 "CNT-014 coater host Rev %s | loop=%lu | State=%d %s | RTI %.0fHz (%.2fx) skip=%u%s", 
-                 Revision, g_loop_count, (int)State, coat_state_name((int)State),
-                 real_hz, rate, skips - last_skips,
-                 stalled_secs ? " | *** STALLED ***" : "");
-        SetConsoleTitleA(title);
-
-        /* Say it once, loudly, when the loop stops returning - the trace lines
-         * from doevents() just before it are what identify where. */
-        if (stalled_secs == 1)
-            LOG_PRINTF(("[STALL] doevents() has not returned for 1s "
-                        "(State=%d %s)\n",
-                        (int)State, coat_state_name((int)State)));
-
-        /* One stall is a deliberate reset, not a hang: ResetProc() arms the
-         * fastest COP rate and spins waiting for a watchdog the host does not
-         * have (RestoreDefaults ends there). CR==1 is unique to that call -
-         * the host never arms the COP otherwise - so a genuine hang still just
-         * logs [STALL] above and stays there to be debugged. */
-        if (stalled_secs >= 1 && (COPCTL & 0x07) == 1) {
-            LOG_PRINTF(("[host] ResetProc spin detected -> resetting unit\n"));
-            pc_side_reset();                  /* relaunches us; does not return */
-        }
-        LOG_PRINTF(("[rti ] %.0f tick/s (need %.0f, %.2fx real-time), %u skipped while masked\n",
-                    real_hz, (double)RTI_One_Sec, rate, skips - last_skips));
-
-        last       = g_loop_count;
-        last_ticks = ticks;
-        last_skips = skips;
-        last_ms    = now;
-    }
-    return 0;
-}
+void RTI_Int_Handler(void);   /* production ISR, Interrupts.c */
+void EEInit(void);            /* core/host_eeprom.c (EEProm.c not compiled) */
 
 /* Names for the coating state machine (the `State` values in Subroutines.h), so
  * the log reads as a sequence instead of bare numbers. */
@@ -234,78 +133,37 @@ static void log_state_transitions(void)
     }
 }
 
-/* Prompt for a UDP port; blank input (Enter) keeps the default. */
-static unsigned short ask_port(const char *label, unsigned short def)
+/* Title bar / [STALL] text. */
+static void unit_status(char *buf, size_t n)
 {
-    char line[32];
-    printf("%s port [%u]: ", label, (unsigned)def);
-    if (fgets(line, sizeof line, stdin)) {
-        int v = atoi(line);            /* blank/non-numeric -> 0 -> keep default */
-        if (v > 0 && v < 65536) return (unsigned short)v;
-    }
-    return def;
+    snprintf(buf, n, "State=%d %s", (int)State, coat_state_name((int)State));
 }
 
-/* Windows consoles ship with QuickEdit ON: clicking in (or selecting text in)
- * the window PAUSES our stdout — the next printf in ANY thread blocks until a
- * key is pressed. With three threads logging here, one stray click silently
- * freezes the host with no error while the rest of the bus keeps running.
- * (ENABLE_EXTENDED_FLAGS must be set for the change to apply.) */
-#ifndef ENABLE_QUICK_EDIT_MODE
-#define ENABLE_QUICK_EDIT_MODE 0x0040
-#endif
-#ifndef ENABLE_EXTENDED_FLAGS
-#define ENABLE_EXTENDED_FLAGS  0x0080
-#endif
-static void disable_console_quickedit(void)
+/* mcohw.c's transmit timeout. */
+static void unit_tx_timed_out(void)
 {
-    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD  mode = 0;
-    if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode)) {
-        mode &= ~ENABLE_QUICK_EDIT_MODE;
-        mode |=  ENABLE_EXTENDED_FLAGS;
-        SetConsoleMode(h, mode);
-    }
+    Gen_Flags |= Gen_Flags_No2Wire;
 }
+
+static const struct pc_side_unit unit = {
+    .name         = "12/48 Coater",
+    .revision     = Revision,
+    .recv_port    = 20010,
+    .send_port    = 20100,
+    .rti_isr      = RTI_Int_Handler,
+    .rti_hz       = RTI_One_Sec,
+    .status       = unit_status,
+    .cop_ctl      = &COPCTL,
+    .can_rflg     = &CANRFLG,
+    .tx_timer     = &Timer1,               /* mcohw.c: Timer1 = 0.5 * RTI_One_Sec */
+    .tx_timeout   = 0.5 * RTI_One_Sec,
+    .tx_timed_out = unit_tx_timed_out,
+};
 
 int main(int argc, char **argv)
 {
-    unsigned short recv_port, send_port;
-    int ports[2], nports = 0, i;
-
-    signal(SIGINT, on_sigint);
-    setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: live logs */
-    disable_console_quickedit();
-
-    printf("12/48 Coater Rev %s - PC-side host  (Ctrl+C to quit)\n", Revision);
-
-    /* --hw-* options anywhere; the first two other arguments are the ports. */
-    for (i = 1; i < argc; i++) {
-        if (pc_side_hw_option(argv[i]))
-            continue;
-        if (!strncmp(argv[i], "--", 2))
-            printf("unknown option %s (ignored)\n", argv[i]);
-        else if (nports < 2)
-            ports[nports++] = atoi(argv[i]);
-    }
-
-    if (nports == 2) {
-        recv_port = (unsigned short)ports[0];
-        send_port = (unsigned short)ports[1];
-    } else {
-        recv_port = ask_port("recv (this host listens on)", 20010);
-        send_port = ask_port("send (hub/peer listens on)",  20100);
-    }
-
-    /* Start async logging now the interactive prompts are done, so all
-     * subsequent logging is non-blocking. */
-    pc_log_init();
-    pc_side_hw_log();
-
-    if (pc_side_can_init(recv_port, send_port) != 0) {
-        LOG_PRINTF(("[fatal] CAN/UDP init failed\n"));
+    if (pc_side_begin(argc, argv, &unit) != 0)
         return 1;
-    }
 
     /* Same order as Controller.c's main(), minus the hardware bring-up.
      * InitInterrupts() registers the timer/RTI configuration; the RTI thread is
@@ -332,17 +190,16 @@ int main(int argc, char **argv)
     LOG_PRINTF(("[host] bringing up the unit...\n"));
     InitPorts();
     InitInterrupts();
-    EEInit();                    /* loads eeprom.bin (pc_side_host.c) */
+    EEInit();                    /* loads eeprom.bin */
 
     /* Real-time RTI simulation. On Rev4.33 this must be running before any
      * Display() call: Display() paces its CAN frames with `while (Timer1)` and
      * only RTI_Int_Handler() decrements Timer1. */
-    rti_thread_start_realtime(1 /* ms per wakeup */);
-    LOG_PRINTF(("[host] RTI sim thread started\n"));
+    pc_side_rti_start();
 
     INTR_ON();          /* enable simulated interrupts (see pc_side.h) */
 
-    CreateThread(NULL, 0, loop_watchdog_fn, NULL, 0, NULL);   /* stall detector */
+    pc_side_watchdog_start();
 
     /* Controller.c's order. After the stall detector, so a ResetProc from a
      * corrupt image is caught and relaunched. */
@@ -372,20 +229,17 @@ int main(int argc, char **argv)
     // VSEL_PORT |= CAM_ON;
 
     LOG_PRINTF(("[host] running main loop\n"));
-    while (g_running) {
+    while (pc_side_running()) {
         /* Controller.c kicks the COP here; the host has no watchdog. */
         doevents();      /* one firmware pass, incl. MCO_ProcessStack (PDO I/O) */
-        g_loop_count++;  /* proof-of-life for loop_watchdog_fn */
 
         log_state_transitions();
         LOG_IF_CHANGED("[in  ] purge moving (IN_digi_31) = %ld", gProcImg[IN_digi_31]);
         LOG_IF_CHANGED("[in  ] actuator moving (OUT_digi_7) = %ld", gProcImg[OUT_digi_7]);
-        Sleep(5);
+
+        pc_side_loop_done();
     }
 
-    LOG_PRINTF(("\n[host] shutting down\n"));
-    rti_thread_stop();
-    pc_side_can_shutdown();
-    pc_log_shutdown();      /* drain the log tail, then stop the writer thread */
+    pc_side_end();
     return 0;
 }

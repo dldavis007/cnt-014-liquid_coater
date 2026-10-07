@@ -28,12 +28,12 @@
 
 #include <stdio.h>
 
-/* Logging is ASYNC (implemented in pc_side_host.c). The firmware/CAN threads log
+/* Logging is ASYNC (implemented in host_log.c). The firmware/CAN threads log
  * on their hot paths, so a slow or stalled terminal must never block them: these
  * macros only format + enqueue a line (dropping it if the queue is full) and
  * return immediately. A dedicated writer thread drains the queue to stdout. Call
  * pc_log_init() once at startup (before any logging) and pc_log_shutdown() at
- * exit to flush the tail. See pc_side_host.c for the rationale. */
+ * exit to flush the tail. See host_log.c for the rationale. */
 void pc_log_init(void);
 void pc_log_shutdown(void);
 void pc_log_printf(const char *fmt, ...);
