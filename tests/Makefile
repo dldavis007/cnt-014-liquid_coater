@@ -62,7 +62,7 @@ SRC     := ../Source_Files
 # the arrays out contiguously in declaration order, the way ICC12 does.
 # -fdata-sections would give each array its own section and let the linker
 # reorder them; GCC's default alignment would pad between them.
-PROD_CFLAGS := -w -g -std=c11 -m32 -funsigned-char -malign-data=abi -ffunction-sections \
+PROD_CFLAGS := -w -g -std=gnu89 -m32 -funsigned-char -malign-data=abi -ffunction-sections \
                -MMD -MP -Wno-unknown-pragmas -Wno-builtin-declaration-mismatch \
                -DPC_SIDE -DSKIP_EEPROM_LOAD -Ddiag -DUNITY_INCLUDE_DOUBLE
 

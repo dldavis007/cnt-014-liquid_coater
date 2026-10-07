@@ -104,6 +104,33 @@ original `HEAD.mak` flags to a `HEAD.s19` **byte-identical to the shipped
 `HEAD.s19`**. The pristine sources reproduce it too, which shows this folder is
 the code that shipped.
 
+## C standard
+
+Firmware sources build with `-std=gnu89`: C89 plus the extensions ICC12
+accepts (`//` comments, `0b` literals, `asm`). GCC's `gnu89` still allows some
+C99 (mixed declarations, `for (int i ...)`), so the ImageCraft build remains
+the real C89 check. Only `core/` and `main.c` use C11, and ImageCraft never
+compiles them.
+
+## TODO: type sizes and byte order differ from the target
+
+| | ICC12 (HCS12) | GCC `-m32` |
+|---|---|---|
+| `int` | 16-bit | 32-bit |
+| pointer | 16-bit | 32-bit |
+| byte order | big-endian | little-endian |
+
+No GCC flag gives x86 a 16-bit `int`, so the host does not reproduce:
+
+- 16-bit overflow and wrap, including in intermediate math like `a * b / c`.
+- Signed/unsigned behaviour at 16 bits (`-1` vs `0xFFFF`).
+- The target's struct layout and multi-byte EEPROM reads, so `eeprom.bin` is
+  not interchangeable with a dump from a real unit.
+
+Options: GCC `-Wconversion`/`-Wsign-compare` on the firmware TUs to flag
+risky spots; fixed-width typedefs (a partial fix only); or run the real `.s19`
+in an HCS12 instruction-set simulator (a full fix).
+
 ## NULL pointers: benign on the HCS12, fatal here
 
 Address 0 on the target is SFR space, so a NULL dereference reads registers and
